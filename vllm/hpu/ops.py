@@ -11,6 +11,12 @@ import torch.nn.functional as F
 import habana_frameworks.torch as htorch
 from typing import List, Optional, Tuple
 
+try:
+    from habana_frameworks.torch.hpex.kernels import FusedSDPA
+except ImportError:
+    print("Not using HPU fused scaled dot-product attention kernel.")
+    FusedSDPA = None
+
 def silu_and_mul(output, input):
     htorch.core.mark_step()
     d = input.shape[-1] // 2
@@ -25,73 +31,150 @@ def gelu_new(output, input):
 def gelu_fast(output, input):
     raise NotImplementedError
 
-def paged_attention_v1(query_in, key_cache_in, value_cache_in, head_mapping, scale, block_tables, context_lens, block_size, max_context_len, alibi_slopes, attn_masks=None)  -> None:
-    query = query_in.bfloat16()
-    key_cache = key_cache_in.bfloat16()
-    value_cache = value_cache_in.bfloat16()
+def _paged_attention_masked_fill(
+    key_blocks,
+    value_blocks,
+    context_lens,
+    key_blocks_filler,
+    value_blocks_filler,
+    block_size,
+    max_num_blocks_per_seq,
+    num_seqs,
+    device,
+):
+    # NOTE (kzawora): this code performs unconditinal out-of-bound cleanup on attention weights.
+    # It was pretty insane to write and is probably hard to read, but it allows us to avoid
+    # recompilations and D2H-H2D copies on Gaudi2, making it very efficient.
+
+    # First, we're filling full out-of bound blocks. We want to create 2D mask [num_seqs, max_num_blocks_per_seq]
+    # indicating which blocks need to be cleaned
+
+    # Create [num_seqs, max_num_blocks_per_seq] tensor of block indices per each sequence,
+    # which we'll then transform into a boolean tensor with mask
+    block_indices = torch.arange(max_num_blocks_per_seq, dtype=torch.int64, device=device).view(1, -1)
+    block_indices = block_indices.expand(num_seqs, block_indices.size(1))
+
+    # Create mask with 1s for all blocks that are fully out of bound, and 0s for the rest.
+    # In order to broadcast the mask across all dimensions, we need to transpose it and
+    # view it as 5D tensor with ones in broadcasted dimensions (max_num_blocks_per_seq, num_seqs, 1, 1, 1)
+    kv_blocks_mask = (block_indices >= (torch.ceil(context_lens / block_size)).unsqueeze(-1)).T.view(
+        max_num_blocks_per_seq, num_seqs, 1, 1, 1
+    )
+
+    key_blocks.masked_fill_(kv_blocks_mask, key_blocks_filler)
+    value_blocks.masked_fill_(kv_blocks_mask, value_blocks_filler)
+
+
+    # We're done with filling full OoB blocks. Now, we need to fill out-of-bound values within last blocks
+    # The problem here is that now, we'll need to fetch all last blocks of each sequence, and fill
+    # the out-of-bound activation in the last dimension (block_size). This is pretty hard to do without
+    # loops and conditons.
+
+    # Collect last block indices. This will include blocks that are both partially, and fully filled.
+    # We expect this index to be in bounds (< max_blocks_per_seq).
+    last_block_indices = (torch.ceil((context_lens / block_size)) - 1).to(torch.int64)
+
+    # Gather indices of last blocks. We will collect plenty of superfluous blocks,
+    # as we'll fetch all (num_seq) indices per each sequence. This will result in
+    # (num_seq, num_seq, num_query_heads, 1, block_size) tensor.
+    last_keys = key_blocks.index_select(0, last_block_indices)  # [num_seqs, num_seqs, num_kv_heads, block_size,  head_size]
+    last_values = value_blocks.index_select(0, last_block_indices)  # [num_seqs, num_seqs, num_kv_heads, block_size,  head_size]
+
+    # Extract only relevant blocks. Since dim0 and dim1 are the same, and we passed last_block_indices in order,
+    # we can reduce these dimensions by extracting the diagonal value. torch.diagonal returns the extracted value
+    # as the last dimension, so we'll need to permute the tensor to get it back to the first one.
+    # We expect to transform the source (num_seq, num_seq, num_query_heads, 1, block_size) tensor into
+    # (num_seq, num_query_heads, 1, block_size) tensor, with the first dimension containing each sequence's last block.
+    last_keys_diag = torch.diagonal(last_keys, dim1=0, dim2=1, offset=0).permute((3, 0, 1, 2))
+    last_values_diag = torch.diagonal(last_values, dim1=0, dim2=1, offset=0).permute((3, 0, 1, 2))
+
+    # Similarly to block mask, we'll create s 2D tensor of token indices per each block,
+    # which we'll then transform into a boolean tensor with mask
+    seq_indices = torch.arange(block_size, dtype=torch.int64, device=device).view(1, -1)
+    seq_indices = seq_indices.expand(num_seqs, seq_indices.size(1))
+
+    # Create mask with 1s for all tokens that are fully out of bound, and 0s for the rest.
+    # We apply a bias of block_size for sequences that have context length divisible by block_size,
+    # as we don't want to clear anything within their last block - it is fully filled
+    last_block_offsets = (context_lens % block_size + block_size * (context_lens % block_size == 0)).view(-1, 1)
+    seq_mask = seq_indices >= last_block_offsets
+
+    # Apply block mask to weights to diagonal (num_seq, num_query_heads, 1, block_size) tensor.
+    last_keys_diag.masked_fill_(seq_mask.view(num_seqs, 1, block_size, 1), value_blocks_filler)
+    last_values_diag.masked_fill_(seq_mask.view(num_seqs, 1, block_size, 1), value_blocks_filler)
+
+    # Scatter the (num_seq, num_query_heads, 1, block_size) tensor back into attn_weights_blocks using
+    # the same indices as we did in gathering. Each "row" will be stored at (last_block_index[i],i),
+    # where i is sequence index.
+    seq_idx = torch.arange(num_seqs, dtype=torch.int64, device=device)
+    edge_indices = (last_block_indices, seq_idx)
+    key_blocks.index_put_(edge_indices, last_keys_diag)
+    value_blocks.index_put_(edge_indices, last_values_diag)
+
+
+def paged_attention_v1(
+    query_in,
+    key_cache_in,
+    value_cache_in,
+    head_mapping,
+    scale,
+    block_tables,
+    context_lens,
+    block_size,
+    max_context_len,
+    alibi_slopes,
+    attn_masks=None,
+) -> None:
+    device = query_in.device
+    query = query_in
+    key_cache = key_cache_in
+    value_cache = value_cache_in
     num_kv_heads = value_cache[0].shape[0]
     head_size = value_cache[0].shape[1]
     block_size = value_cache[0].shape[2]
     num_seqs = query.shape[0]
-    num_query_heads = query.shape[1]
     max_num_blocks_per_seq = block_tables.shape[1]
 
-    if alibi_slopes or num_query_heads != num_kv_heads: #or attn_masks is None:
+    if alibi_slopes:
         raise NotImplementedError
 
-    attn_weights_blocks = []
-    value_blocks = []
-    seq_index = torch.tensor([0], dtype=torch.int64, device="hpu")
-
-    for i in range(0, max_num_blocks_per_seq):
-        # FIXME: dynamic hard override for filler. These blocks would contribute nothing to the output due to zero attention_probs and
-        #  will clog up compute resources. The override itself makes the code unsuitable for graph precompilation
-        if (i - 2) * block_size > torch.max(context_lens):
-            break
-        attn_weights = torch.full((num_seqs, num_query_heads, 1, block_size), torch.finfo(query.dtype).min, dtype=query.dtype, device="hpu")
-        values = torch.zeros((num_seqs, num_query_heads, head_size, block_size), dtype=query.dtype, device="hpu")
-        for seq_id in range(num_seqs):
-            seq_index.fill_(seq_id)
-            if i * block_size < context_lens[seq_id]:
-
-                q =  torch.index_select(query, 0, seq_index).transpose(0, 1)
-                key = torch.index_select(key_cache, 0, block_tables[seq_id][i]).squeeze(0)
-                attn_weight = scale * torch.matmul(q, key)
-
-                if attn_masks is not None:
-                    attn_mask = torch.index_select(attn_masks[i], 0, seq_index)
-                    attn_weight = torch.masked_fill(attn_weight, ~(attn_mask.unsqueeze(0).to(torch.bool)), torch.finfo(attn_weight.dtype).min)
-
-                # FIXME: these dynamic checks serve to ensure the -inf default value is not overwritten with fillers that would cause errors
-                #  in logsoftmax computation. A change to custom block multiplication code is required to avoid incurring extra costs here
-                if context_lens[seq_id] < (i + 1) * block_size:
-                    if context_lens[seq_id] - i*block_size < 0:
-                        attn_weight = torch.finfo(query.dtype).min
-                    else:
-                        attn_weight[:, :, context_lens[seq_id] - i*block_size:] = torch.finfo(query.dtype).min
-                attn_weights.index_copy_(0, seq_index, attn_weight.unsqueeze(0))
-            value = torch.index_select(value_cache, 0, block_tables[seq_id][i])
-            # FIXME: these checks concern filler values in the V cache and should be removed once the underlying issue is addressed
-            value = torch.nan_to_num(value)
-            value[value < -1.0e+30] = 0.0
-            values.index_copy_(0, seq_index, value)
-            torch.hpu.synchronize()
-
-        attn_weights_blocks.append(attn_weights.reshape(num_seqs * num_query_heads, 1, block_size))
-        value_blocks.append(values.reshape(num_seqs * num_query_heads, head_size, block_size).transpose(1, 2))
-
-    exp_sum = torch.zeros((*attn_weights_blocks[0].shape[:2], 1), dtype=attn_weights_blocks[0].dtype, device="hpu")
-    for x in attn_weights_blocks:
-        exp_sum.add_(torch.exp(x).sum(dim=-1, keepdim=True))
-
-    output = torch.zeros_like(query)
-    for i in range(len(attn_weights_blocks)):
-        attention_probs = torch.exp(attn_weights_blocks[i]) / exp_sum
-        value = value_blocks[i]
-        out = torch.matmul(attention_probs.to(value.dtype), value).reshape(num_seqs, num_query_heads, head_size)
-        output.add_(out)
-    htorch.core.mark_step()
-    return output.to(dtype=query_in.dtype)
+    key_blocks = torch.zeros((max_num_blocks_per_seq, num_seqs, num_kv_heads, block_size, head_size), dtype=query.dtype, device=device)
+    value_blocks = torch.zeros((max_num_blocks_per_seq, num_seqs, num_kv_heads, block_size, head_size), dtype=query.dtype, device=device)
+    block_index = torch.tensor([0], dtype=torch.int64, device=device)
+    for _ in range(0, max_num_blocks_per_seq):  # can run in parallel
+        block_table = block_tables.index_select(1, block_index).squeeze(1)
+        keys = torch.index_select(key_cache, 0, block_table)
+        values = torch.index_select(value_cache, 0, block_table)
+        value_blocks.index_copy_(0, block_index, values.permute((0, 1, 3, 2)).unsqueeze(0))
+        key_blocks.index_copy_(0, block_index, keys.permute((0, 1, 3, 2)).unsqueeze(0))
+        block_index.add_(1)
+        if device == "hpu":
+            htorch.core.mark_step()
+            
+    _paged_attention_masked_fill(
+        key_blocks,
+        value_blocks,
+        context_lens,
+        0.0,
+        0.0,
+        block_size,
+        max_num_blocks_per_seq,
+        num_seqs,
+        device,
+    )
+    
+    # FIXME(kzawora): Re-add attn_masks support here
+    seq_indices = torch.arange(block_size*max_num_blocks_per_seq, dtype=torch.int64, device=device).view(1, -1)
+    seq_indices = seq_indices.expand(num_seqs, seq_indices.size(1))
+    fsdpa_attn_mask = (seq_indices < context_lens.unsqueeze(-1)).view(num_seqs, 1,  1, block_size*max_num_blocks_per_seq).expand(num_seqs, 1, 1, block_size*max_num_blocks_per_seq)
+    fsdpa_query = query.unsqueeze(2)
+    fsdpa_keys = key_blocks.permute((0,3,1,2,4)).flatten(0,1).permute((1,2,0,3))
+    fsdpa_values = value_blocks.permute((0,3,1,2,4)).flatten(0,1).permute((1,2,0,3))
+    with htorch.hpu.sdp_kernel(enable_recompute=False):
+        attn_output = FusedSDPA.apply(
+            fsdpa_query, fsdpa_keys, fsdpa_values, fsdpa_attn_mask, 0.0, False, scale
+        )
+    return attn_output.squeeze(2)
 
 def rms_norm(out, hidden_states, weight, eps):
     htorch.core.mark_step()
