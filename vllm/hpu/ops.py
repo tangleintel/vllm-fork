@@ -26,13 +26,10 @@ def gelu_fast(output, input):
     raise NotImplementedError
 
 
-def fetch_from_cache(cache, blocks, batch_size):
-    return (cache
-            .index_select(0, blocks.flatten())
-            .unflatten(0, (batch_size, -1))
-            .permute(0, 2, 3, 1, 4)
-            .flatten(3, 4)
-            .flatten(0, 1))
+def fetch_from_cache(cache, blocks):
+    _, seq_len = blocks.shape
+    return torch.cat([cache.index_select(0, blocks[:, i]) for i in range(seq_len)], dim=-1).flatten(0, 1)
+
 
 
 def paged_attention_v1(query_in, key_cache_in, value_cache_in, head_mapping, scale, block_tables, context_lens, block_size, max_context_len, alibi_slopes, attn_masks=None)  -> None:
@@ -42,8 +39,8 @@ def paged_attention_v1(query_in, key_cache_in, value_cache_in, head_mapping, sca
         raise NotImplementedError
     batch_size, num_head, head_dim = query_in.shape
     query_in = query_in.view(batch_size * num_head, 1, head_dim)
-    key = fetch_from_cache(key_cache_in, block_tables, batch_size)
-    value = fetch_from_cache(value_cache_in, block_tables, batch_size)
+    key = fetch_from_cache(key_cache_in, block_tables)
+    value = fetch_from_cache(value_cache_in, block_tables)
     seq_len = key.size(-1)
     attn_weights = torch.bmm(query_in, key).mul_(scale)
     min_inf = torch.finfo(query_in.dtype).min
