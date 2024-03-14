@@ -1,6 +1,8 @@
 import time
 from typing import Dict, List, Tuple, Union
 
+import itertools
+import math
 import numpy as np
 import torch
 import torch.nn as nn
@@ -19,6 +21,7 @@ _PAD_SLOT_ID = -1
 # Capture graphs for batch size 1, 2, 4, 8, 16, 24, 32, 40, ..., 256.
 # NOTE: _get_graph_batch_size needs to be updated if this list is changed.
 _BATCH_SIZES_TO_CAPTURE = [1, 2, 4] + [8 * i for i in range(1, 33)]
+_BLOCK_COUNTS_TO_CAPTURE = [1, 2, 4] + [8 * i for i in range(1, 33)]
 
 
 class ModelRunner:
@@ -40,7 +43,7 @@ class ModelRunner:
         self.model = None
         self.block_size = None  # Set after initial profiling.
 
-        self.graph_runners: Dict[int, CUDAGraphRunner] = {}
+        self.graph_runners: Dict[Tuple[int, int], FakeHPUGraphRunner] = {}
         self.graph_memory_pool = None  # Set during graph capture.
 
         self.max_context_len_to_capture = (
@@ -206,7 +209,7 @@ class ModelRunner:
         # When using CUDA graph, we don't need to make the tensors on the GPU
         # because they will be eventually copied to the designated GPU buffer.
         device = "cpu" if use_captured_graph else "cuda"
-        pin_memory = use_captured_graph and not self.in_wsl
+        pin_memory = False # use_captured_graph and not self.in_wsl
         input_tokens = _make_tensor_with_pad(input_tokens,
                                              max_len=1,
                                              pad=0,
@@ -233,7 +236,12 @@ class ModelRunner:
         if use_captured_graph:
             # The shape of graph_block_tables is
             # [max batch size, max context len // block size].
-            input_block_tables = self.graph_block_tables[:batch_size]
+            
+            block_count = math.ceil(max_context_len / self.block_size)
+            graph_block_count  = _get_graph_block_count(block_count)
+            assert graph_block_count >= block_count
+            
+            input_block_tables = self.graph_block_tables[:batch_size, :graph_block_count]
             for i, block_table in enumerate(block_tables):
                 if block_table:
                     input_block_tables[i, :len(block_table)] = block_table
@@ -347,7 +355,10 @@ class ModelRunner:
         # Execute the model.
         if input_metadata.use_cuda_graph:
             graph_batch_size = input_tokens.shape[0]
-            model_executable = self.graph_runners[graph_batch_size]
+            graph_block_count = input_metadata.block_tables.shape[1] 
+            graph_runner_key = (graph_batch_size, graph_block_count)
+            model_executable = self.graph_runners[graph_runner_key]
+           # logger.info(f"Executing GraphRunner with batch {graph_batch_size}, block_count {graph_block_count} (context_len up to {graph_block_count*self.block_size}, currently {torch.max(input_metadata.context_lens).item()})")
         else:
             model_executable = self.model
         hidden_states = model_executable(
@@ -422,18 +433,17 @@ class ModelRunner:
 
         # NOTE: Capturing the largest batch size first may help reduce the
         # memory usage of CUDA graph.
-        for batch_size in reversed(_BATCH_SIZES_TO_CAPTURE):
+        for batch_size, block_count in itertools.product(reversed(_BATCH_SIZES_TO_CAPTURE), reversed(_BLOCK_COUNTS_TO_CAPTURE)): 
             # Create dummy input_metadata.
             input_metadata = InputMetadata(
                 prompt_lens=[],
                 slot_mapping=slot_mapping[:batch_size],
-                max_context_len=self.max_context_len_to_capture,
+                max_context_len=block_count*self.block_size,
                 context_lens=context_lens[:batch_size],
-                block_tables=block_tables[:batch_size],
+                block_tables=block_tables[:batch_size, :block_count],
                 use_cuda_graph=True,
             )
-
-            graph_runner = CUDAGraphRunner(self.model)
+            graph_runner = FakeHPUGraphRunner(self.model)
             graph_runner.capture(
                 input_tokens[:batch_size],
                 input_positions[:batch_size],
@@ -441,8 +451,8 @@ class ModelRunner:
                 input_metadata,
                 memory_pool=self.graph_memory_pool,
             )
-            self.graph_memory_pool = graph_runner.graph.pool()
-            self.graph_runners[batch_size] = graph_runner
+            #self.graph_memory_pool = graph_runner.graph.pool()
+            self.graph_runners[(batch_size, block_count)] = graph_runner
 
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
@@ -531,6 +541,44 @@ class CUDAGraphRunner:
         return self.forward(*args, **kwargs)
 
 
+
+
+class FakeHPUGraphRunner:
+
+    def __init__(self, model: nn.Module):
+        self.model = model
+        self.graph = None
+        self.input_buffers: Dict[str, torch.Tensor] = {}
+        self.output_buffers: Dict[str, torch.Tensor] = {}
+
+    def capture(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        kv_caches: List[KVCache],
+        input_metadata: InputMetadata,
+        memory_pool,
+    ) -> None:
+        return
+
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        kv_caches: List[Tuple[torch.Tensor, torch.Tensor]],
+        input_metadata: InputMetadata,
+    ) -> torch.Tensor:
+        return self.model(
+            input_ids,
+            positions,
+            kv_caches,
+            input_metadata,
+        )
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
+
+
 def _pad_to_max(x: List[int], max_len: int, pad: int) -> List[int]:
     assert len(x) <= max_len
     return x + [pad] * (max_len - len(x))
@@ -558,6 +606,14 @@ def _get_graph_batch_size(batch_size: int) -> int:
         return 4
     else:
         return (batch_size + 7) // 8 * 8
+
+def _get_graph_block_count(block_count: int) -> int:
+    if block_count <= 2:
+        return block_count
+    elif block_count <= 4:
+        return 4
+    else:
+        return (block_count + 7) // 8 * 8
 
 
 def _async_h2d(data: list, dtype, pin_memory):
