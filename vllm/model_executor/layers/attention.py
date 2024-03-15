@@ -101,7 +101,7 @@ class PagedAttention(nn.Module):
             if not is_hpu():
                 cache_ops.reshape_and_cache(
                     key,
-                    value, 
+                    value,
                     key_cache,
                     value_cache,
                     input_metadata.slot_mapping.flatten(),
