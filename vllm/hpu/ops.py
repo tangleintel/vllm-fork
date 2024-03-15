@@ -37,6 +37,7 @@ def paged_attention_v1(query_in, key_cache_in, value_cache_in, head_mapping, sca
         raise NotImplementedError
     if attn_masks is not None:
         raise NotImplementedError
+    htorch.core.mark_step()
     batch_size, num_head, head_dim = query_in.shape
     query_in = query_in.view(batch_size * num_head, 1, head_dim)
     key = fetch_from_cache(key_cache_in, block_tables)
@@ -51,6 +52,7 @@ def paged_attention_v1(query_in, key_cache_in, value_cache_in, head_mapping, sca
     attn_weights = torch.softmax(attn_weights, dim=-1)
     attn_weights = torch.bmm(attn_weights, value.transpose(1, 2))
     attn_weights = attn_weights.view(batch_size, num_head, head_dim)
+    htorch.core.mark_step()
     return attn_weights
 
 
