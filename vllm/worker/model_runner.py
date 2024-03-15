@@ -20,7 +20,7 @@ KVCache = Tuple[torch.Tensor, torch.Tensor]
 _PAD_SLOT_ID = -1
 # Capture graphs for batch size 1, 2, 4, 8, 16, 24, 32, 40, ..., 256.
 # NOTE: _get_graph_batch_size needs to be updated if this list is changed.
-_BATCH_SIZES_TO_CAPTURE = [1, 2, 4] + [8 * i for i in range(1, 33)]
+_BATCH_SIZES_TO_CAPTURE = [1, 2, 4, 8] #+ [8 * i for i in range(1, 33)]
 _BLOCK_COUNTS_TO_CAPTURE = [1, 2, 4] + [8 * i for i in range(1, 33)]
 
 
@@ -43,7 +43,7 @@ class ModelRunner:
         self.model = None
         self.block_size = None  # Set after initial profiling.
 
-        self.graph_runners: Dict[Tuple[int, int], FakeHPUGraphRunner] = {}
+        self.graph_runners: Dict[Tuple[int, int], CUDAGraphRunner] = {}
         self.graph_memory_pool = None  # Set during graph capture.
 
         self.max_context_len_to_capture = (
@@ -358,7 +358,7 @@ class ModelRunner:
             graph_block_count = input_metadata.block_tables.shape[1] 
             graph_runner_key = (graph_batch_size, graph_block_count)
             model_executable = self.graph_runners[graph_runner_key]
-           # logger.info(f"Executing GraphRunner with batch {graph_batch_size}, block_count {graph_block_count} (context_len up to {graph_block_count*self.block_size}, currently {torch.max(input_metadata.context_lens).item()})")
+            logger.info(f"Executing GraphRunner with batch {graph_batch_size}, block_count {graph_block_count} (context_len up to {graph_block_count*self.block_size}, currently {torch.max(input_metadata.context_lens).item()})")
         else:
             model_executable = self.model
         hidden_states = model_executable(
@@ -433,7 +433,7 @@ class ModelRunner:
 
         # NOTE: Capturing the largest batch size first may help reduce the
         # memory usage of CUDA graph.
-        for batch_size, block_count in itertools.product(reversed(_BATCH_SIZES_TO_CAPTURE), reversed(_BLOCK_COUNTS_TO_CAPTURE)): 
+        for idx, (batch_size, block_count) in enumerate(itertools.product(reversed(_BATCH_SIZES_TO_CAPTURE), reversed(_BLOCK_COUNTS_TO_CAPTURE))): 
             # Create dummy input_metadata.
             input_metadata = InputMetadata(
                 prompt_lens=[],
@@ -443,7 +443,9 @@ class ModelRunner:
                 block_tables=block_tables[:batch_size, :block_count],
                 use_cuda_graph=True,
             )
-            graph_runner = FakeHPUGraphRunner(self.model)
+            graph_runner = CUDAGraphRunner(self.model)
+            logger.info(f"[{idx}/{len(_BATCH_SIZES_TO_CAPTURE)*len(_BLOCK_COUNTS_TO_CAPTURE)}] Capturing GraphRunner for batch {batch_size}, block_count {block_count}...")
+            capture_start = time.time()
             graph_runner.capture(
                 input_tokens[:batch_size],
                 input_positions[:batch_size],
@@ -453,6 +455,8 @@ class ModelRunner:
             )
             #self.graph_memory_pool = graph_runner.graph.pool()
             self.graph_runners[(batch_size, block_count)] = graph_runner
+            capture_end = time.time()
+            logger.info(f"[{idx}/{len(_BATCH_SIZES_TO_CAPTURE)*len(_BLOCK_COUNTS_TO_CAPTURE)}] Capturing GraphRunner for batch {batch_size}, block_count {block_count}... done in {capture_end-capture_start:.2f} seconds!")
 
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
