@@ -32,19 +32,19 @@ def fetch_from_cache(cache, blocks):
 
 
 
-def paged_attention_v1(query_in, key_cache_in, value_cache_in, head_mapping, scale, block_tables, context_lens, block_size, max_context_len, alibi_slopes, attn_masks=None)  -> None:
+def paged_attention_v1(query, key_cache, value_cache, head_mapping, scale, block_tables, context_lens, block_size, max_context_len, alibi_slopes, attn_masks=None)  -> None:
     if alibi_slopes is not None:
         raise NotImplementedError
     if attn_masks is not None:
         raise NotImplementedError
     htorch.core.mark_step()
-    batch_size, num_head, head_dim = query_in.shape
-    query_in = query_in.view(batch_size * num_head, 1, head_dim)
-    key = fetch_from_cache(key_cache_in, block_tables)
-    value = fetch_from_cache(value_cache_in, block_tables)
+    batch_size, num_head, head_dim = query.shape
+    query = query.view(batch_size * num_head, 1, head_dim)
+    key = fetch_from_cache(key_cache, block_tables)
+    value = fetch_from_cache(value_cache, block_tables)
     seq_len = key.size(-1)
-    attn_weights = torch.bmm(query_in, key).mul_(scale)
-    min_inf = torch.finfo(query_in.dtype).min
+    attn_weights = torch.bmm(query, key).mul_(scale)
+    min_inf = torch.finfo(query.dtype).min
     mask = torch.arange(0, seq_len, dtype=torch.int32, device=key.device).view(1, 1, -1).expand(batch_size, 1, seq_len)
     mask = mask.ge(context_lens.view(-1, 1, 1))
     mask = mask.repeat_interleave(num_head, dim=0)
