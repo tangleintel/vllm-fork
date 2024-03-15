@@ -209,7 +209,7 @@ class ModelRunner:
         # When using CUDA graph, we don't need to make the tensors on the GPU
         # because they will be eventually copied to the designated GPU buffer.
         device = "cpu" if use_captured_graph else "cuda"
-        pin_memory = False # use_captured_graph and not self.in_wsl
+        pin_memory = use_captured_graph and not self.in_wsl and not is_hpu()
         input_tokens = _make_tensor_with_pad(input_tokens,
                                              max_len=1,
                                              pad=0,
@@ -453,7 +453,7 @@ class ModelRunner:
                 input_metadata,
                 memory_pool=self.graph_memory_pool,
             )
-            #self.graph_memory_pool = graph_runner.graph.pool()
+            self.graph_memory_pool = graph_runner.graph.pool() if not is_hpu() else None
             self.graph_runners[(batch_size, block_count)] = graph_runner
             capture_end = time.time()
             logger.info(f"[{idx}/{len(_BATCH_SIZES_TO_CAPTURE)*len(_BLOCK_COUNTS_TO_CAPTURE)}] Capturing GraphRunner for batch {batch_size}, block_count {block_count}... done in {capture_end-capture_start:.2f} seconds!")
