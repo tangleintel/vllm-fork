@@ -11,6 +11,9 @@ import torch.nn.functional as F
 import habana_frameworks.torch as htorch
 from typing import List, Optional, Tuple
 
+import vllm.hpu.utils as hpu_utils
+
+
 def silu_and_mul(output, input):
     d = input.shape[-1] // 2
     silu = torch.nn.SiLU().to(input.device)
@@ -28,29 +31,50 @@ def gelu_fast(output, input):
 
 def fetch_from_cache(cache, blocks):
     _, seq_len = blocks.shape
-    return torch.cat([cache.index_select(0, blocks[:, i]) for i in range(seq_len)], dim=-1).flatten(0, 1)
+    return torch.cat([cache.index_select(0, blocks[:, i]) for i in range(seq_len)], dim=-1)
 
 
+def scaled_dot_product_attention(query, key, value, scale, mask):
+    bs = query.size(0)
+    min_inf = torch.finfo(query.dtype).min
+    return (torch.matmul(query, key)
+            .mul_(scale)
+            .masked_fill_(mask, min_inf)
+            .softmax(dim=-1)
+            .matmul(value.transpose(-1, -2)))
 
-def paged_attention_v1(query_in, key_cache_in, value_cache_in, head_mapping, scale, block_tables, context_lens, block_size, max_context_len, alibi_slopes, attn_masks=None)  -> None:
+
+@hpu_utils.with_mark_steps
+def paged_attention_v1(query, key_cache, value_cache, head_mapping, scale, block_tables, context_lens, block_size, max_context_len, alibi_slopes, attn_masks=None)  -> None:
     if alibi_slopes is not None:
         raise NotImplementedError
     if attn_masks is not None:
         raise NotImplementedError
-    batch_size, num_head, head_dim = query_in.shape
-    query_in = query_in.view(batch_size * num_head, 1, head_dim)
-    key = fetch_from_cache(key_cache_in, block_tables)
-    value = fetch_from_cache(value_cache_in, block_tables)
-    seq_len = key.size(-1)
-    attn_weights = torch.bmm(query_in, key).mul_(scale)
-    min_inf = torch.finfo(query_in.dtype).min
-    mask = torch.arange(0, seq_len, dtype=torch.int32, device=key.device).view(1, 1, -1).expand(batch_size, 1, seq_len)
-    mask = mask.ge(context_lens.view(-1, 1, 1))
-    mask = mask.repeat_interleave(num_head, dim=0)
-    attn_weights.masked_fill_(mask, min_inf)
-    attn_weights = torch.softmax(attn_weights, dim=-1)
-    attn_weights = torch.bmm(attn_weights, value.transpose(1, 2))
-    attn_weights = attn_weights.view(batch_size, num_head, head_dim)
+
+    key = fetch_from_cache(key_cache, block_tables)
+    value = fetch_from_cache(value_cache, block_tables)
+    query = query.unsqueeze(-2)
+    batch_size, query_heads, head_dim, _ = query.shape
+    _, kv_heads, _, seq_len = key.shape
+
+    mask = (torch.arange(0, seq_len, dtype=torch.int32, device=key.device)
+            .view(1, -1)
+            .expand(batch_size, seq_len)
+            .ge(context_lens.view(-1, 1))
+            .view(batch_size, 1, 1, -1))
+
+    if query_heads != kv_heads:
+        attn_weights = scaled_dot_product_attention(
+            query.unflatten(1, (kv_heads, -1)),
+            key.unsqueeze(2),
+            value.unsqueeze(2),
+            scale,
+            mask.unsqueeze(2))
+        attn_weights = attn_weights.flatten(1, 2)
+    else:
+        attn_weights = scaled_dot_product_attention(query, key, value, scale, mask)
+    attn_weights = attn_weights.squeeze(-2)
+
     return attn_weights
 
 
