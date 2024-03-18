@@ -47,21 +47,43 @@ def memory_efficient_attention_forward(
     assert attn_bias is not None, "Attention mask is required for prompt processing"
     dim = query.dim()
     if FusedSDPA and isinstance(attn_bias, BlockDiagonalCausalMask):
-        _, _, heads, head_dim = query.shape
         bs = len(cu_seq_lens) - 1
         seq_len_q = query.shape[1] // bs
         seq_len_kv = key.shape[1] // bs
-        query = query.reshape(bs, seq_len_q, heads, head_dim).permute(0, 2, 1, 3)
-        key = key.reshape(bs, seq_len_kv, heads, head_dim).permute(0, 2, 1, 3)
-        value = value.reshape(bs, seq_len_kv, heads, head_dim).permute(0, 2, 1, 3)
-        attn_mask = torch.ones((bs, heads, seq_len_q, seq_len_kv), device=query.device, dtype=torch.bool).tril()
+        heads, head_dim = query.shape[-2], query.shape[-1] 
+        attn_groups = 1 if dim != 5 else query.shape[2]
+        query = query.reshape(bs, seq_len_q, attn_groups, heads, head_dim)
+        key = key.reshape(bs, seq_len_kv, attn_groups, heads, head_dim)
+        value = value.reshape(bs, seq_len_kv, attn_groups, heads, head_dim)
+        attn_mask_shape = None
+        if dim == 4:
+            # [bs, seq_len, 1, heads, head_dim] -> [bs, heads, seq_len, head_dim]
+            query = query.squeeze(2).permute(0, 2, 1, 3)
+            key = key.squeeze(2).permute(0, 2, 1, 3)
+            value = value.squeeze(2).permute(0, 2, 1, 3)
+            attn_mask_shape = (bs, heads, seq_len_q, seq_len_kv)
+        elif dim == 5:
+            # [bs, seq_len, attn_groups, heads, head_dim] -> [bs, attn_groups, heads, seq_len, head_dim]
+            query = query.permute(0, 2, 3, 1, 4) 
+            key = key.permute(0, 2, 3, 1, 4) 
+            value = value.permute(0, 2, 3, 1, 4) 
+            attn_mask_shape = (bs, attn_groups, heads, seq_len_q, seq_len_kv)
+        else:
+            raise ValueError(f"Unsupported attention dimension: {dim}")
+
+        attn_mask = torch.ones(attn_mask_shape, device=query.device, dtype=torch.bool).tril()
         import habana_frameworks.torch.hpu as ht
         with ht.sdp_kernel(enable_recompute=False):  # (flash_attention_recompute and q_len == 1)):
             out = FusedSDPA.apply(
                 query, key, value, attn_mask, 0.0, False, None
             )
         htorch.core.mark_step()
-        out = out.permute(0, 2, 1, 3).reshape(bs * seq_len_q, heads, head_dim)
+        if dim == 4:
+            # [bs, heads, seq_len, head_dim] -> [bs, seq_len, heads, head_dim]
+            out = out.permute(0, 2, 1, 3).reshape(bs * seq_len_q, heads, head_dim)
+        elif dim == 5:
+            # [bs, attn_groups, heads, seq_len, head_dim] -> [bs, seq_len, attn_groups, heads, head_dim] 
+            out = out.permute(0, 3, 1, 2, 4).reshape(bs * seq_len_q, attn_groups, heads, head_dim)
     else:
         if dim == 4:
             query, key, value = query.squeeze(0), key.squeeze(0), value.squeeze(0)
@@ -86,6 +108,6 @@ def memory_efficient_attention_forward(
             )
             outputs.append(output)
         out = torch.cat(outputs, dim=0)
-    if dim == 4:
+    if dim >= 4:
         out = out.unsqueeze(0)
     return out
