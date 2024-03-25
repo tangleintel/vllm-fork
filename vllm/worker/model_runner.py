@@ -43,7 +43,7 @@ class ModelRunner:
         self.model = None
         self.block_size = None  # Set after initial profiling.
 
-        self.graph_runners: Dict[Tuple[int, int], CUDAGraphRunner] = {}
+        self.graph_runners: Dict[Tuple[int, int], FakeHPUGraphRunner] = {}
         self.graph_memory_pool = None  # Set during graph capture.
 
         self.max_context_len_to_capture = (
@@ -443,7 +443,7 @@ class ModelRunner:
                 block_tables=block_tables[:batch_size, :block_count],
                 use_cuda_graph=True,
             )
-            graph_runner = CUDAGraphRunner(self.model)
+            graph_runner = FakeHPUGraphRunner(self.model)
             logger.info(f"[{idx}/{len(_BATCH_SIZES_TO_CAPTURE)*len(_BLOCK_COUNTS_TO_CAPTURE)}] Capturing GraphRunner for batch {batch_size}, block_count {block_count}...")
             capture_start = time.time()
             graph_runner.capture(
@@ -573,8 +573,8 @@ class FakeHPUGraphRunner:
         input_metadata: InputMetadata,
     ) -> torch.Tensor:
         return self.model(
-            input_ids,
-            positions,
+            input_ids.to('hpu'),
+            positions.to('hpu'),
             kv_caches,
             input_metadata,
         )

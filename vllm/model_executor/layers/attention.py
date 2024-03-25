@@ -114,7 +114,7 @@ class PagedAttention(nn.Module):
                     value,
                     key_cache,
                     value_cache,
-                    input_metadata.slot_mapping,
+                    input_metadata.slot_mapping.to('hpu'),
                     input_metadata.is_prompt
                 )
 
@@ -275,8 +275,8 @@ def _paged_attention(
             value_cache,
             num_kv_heads,
             scale,
-            input_metadata.block_tables,
-            input_metadata.context_lens,
+            input_metadata.block_tables.to('hpu'),
+            input_metadata.context_lens.to('hpu'),
             block_size,
             input_metadata.max_context_len,
             alibi_slopes,
