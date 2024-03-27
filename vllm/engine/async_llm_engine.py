@@ -11,6 +11,14 @@ from vllm.engine.ray_utils import initialize_cluster, ray
 from vllm.logger import init_logger
 from vllm.outputs import RequestOutput
 from vllm.sampling_params import SamplingParams
+from vllm.utils import is_hpu
+import multiprocessing
+import torch
+if is_hpu():
+    from vllm.hpu.time_utils import device_utilization_counter
+    import habana_frameworks.torch as htorch
+    #from habana_frameworks.torch.hpu.metrics import metrics_dump
+    from habana_frameworks.torch.hpu.metrics import metric_localcontext
 
 logger = init_logger(__name__)
 
@@ -351,13 +359,79 @@ class AsyncLLMEngine:
             self.engine.abort_request(request_ids)
 
     async def run_engine_loop(self):
+        profiling = False
+        if profiling:
+            activities = [torch.profiler.ProfilerActivity.CPU]
+            if is_hpu():
+                activities.append(torch.profiler.ProfilerActivity.HPU)
+            prof = torch.profiler.profile(
+                schedule = torch.profiler.schedule(wait=4, warmup=0, active=2, repeat=1),
+                activities = activities,
+                with_stack = True,
+                record_shapes = False,
+                on_trace_ready = torch.profiler.tensorboard_trace_handler("./", use_gzip = True)
+            )
+            prof.start()
+
+        timing = False
+        if timing:
+            hpu_start = htorch.hpu.Event(enable_timing=True)
+            hpu_end = htorch.hpu.Event(enable_timing=True)
+            cpu_start = 0
+            cpu_stop = 0 
+
+        pyhlml_step = 0
+        pyhlml_max_steps = 3
+        import os
+        os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
         # Initialize the RequestTracker here so it uses the right event loop.
         has_requests_in_progress = False
-        while True:
+        while True: 
             if not has_requests_in_progress:
                 await self._request_tracker.wait_for_new_requests()
+            if timing:
+                hpu_start.record()
+                cpu_start = time.perf_counter()            
+
+            #if pyhlml_step < pyhlml_max_steps:
+            device_utilization_queue = multiprocessing.Queue(maxsize=1)
+            device_utilization_results = multiprocessing.Manager().list()
+            device_utilization_process = multiprocessing.Process(
+                target=device_utilization_counter,
+                args=(device_utilization_queue, device_utilization_results)
+            )
+            device_utilization_process.start()
+            
             has_requests_in_progress = await self.engine_step()
             await asyncio.sleep(0)
+
+            #if pyhlml_step < pyhlml_max_steps:
+            device_utilization_process.kill()
+            device_utilization_process.join()
+            if device_utilization_results:
+                print(f'HPU mean utilization') # = {utilization_data}')
+                for u in device_utilization_results:
+                    print(u)
+                #pyhlml_step += 1
+
+            if timing:
+                hpu_end.record()
+                htorch.hpu.synchronize()
+                cpu_stop = time.perf_counter()
+                cpu_time = cpu_stop - cpu_start
+                hpu_time = hpu_start.elapsed_time(hpu_end)/1000
+                print(f'CPU = {cpu_time:.6f}\tHPU = {hpu_time:.6f}')
+            if profiling:
+                prof.step()
+        
+        if profiling:
+            if is_hpu():
+                htorch.hpu.synchronize()
+            prof.export_chrome_trace("/home/surwan/workspace/gpu_volume/metrics/online_fast.json")
+            prof.stop()
+        
+        #pyhlml.hlmlShutdown()
 
     async def add_request(
         self,
