@@ -96,6 +96,7 @@ class HpuRotaryEmbedding(nn.Module):
         self.register_buffer("cos_cached", emb.cos().to(dtype), persistent=False)
         self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)
 
+    #@torch.compiler.disable
     def forward(self, positions: torch.Tensor, query: torch.Tensor, key: torch.Tensor):
         seq_len = key.shape[-2]
         if seq_len > self.max_seq_len_cached:
@@ -106,11 +107,22 @@ class HpuRotaryEmbedding(nn.Module):
         key = key.reshape((key.shape[0], key.shape[1], key.shape[2] // self.head_size, self.head_size))
         if query.device.type == "hpu" and FusedRoPE:
             if len(positions[0]) == 1:
-                cos = self.cos_cached[positions].unsqueeze(2).to(dtype=query.dtype)
-                sin = self.sin_cached[positions].unsqueeze(2).to(dtype=query.dtype)
+                #try:
+                cos = self.cos_cached[positions].unsqueeze(2)
+                sin = self.sin_cached[positions].unsqueeze(2)
+                try:
+                    cos = cos.to(dtype=query.dtype)
+                    sin = sin.to(dtype=query.dtype)
+                except:
+                    cos = cos.to(dtype=query.dtype)
+                    sin = sin.to(dtype=query.dtype)
+                #except:
+                #    cos = self.cos_cached[positions].unsqueeze(2).to(dtype=query.dtype)
+                #    sin = self.sin_cached[positions].unsqueeze(2).to(dtype=query.dtype)
             else:
                 cos = cos[positions].unsqueeze(2)
                 sin = sin[positions].unsqueeze(2)
+            #print(f'dtypes: q={query.shape}:{query.dtype}, k={key.shape}:{key.dtype}, cos={cos.shape}:{cos.dtype}, sin={sin.shape}:{sin.dtype}')
             query, key = FusedRoPE.apply(query, cos, sin, 0), FusedRoPE.apply(key, cos, sin, 0)
         else:
             query, key = apply_rotary_pos_emb(query, key, cos, sin, positions)

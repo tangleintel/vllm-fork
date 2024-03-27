@@ -190,7 +190,7 @@ class LlamaDecoderLayer(nn.Module):
         self.post_attention_layernorm = RMSNorm(config.hidden_size,
                                                 eps=config.rms_norm_eps)
 
-    @torch.compiler.disable
+    #@torch.compiler.disable
     def forward(
         self,
         positions: torch.Tensor,

@@ -29,7 +29,7 @@ class RMSNorm(nn.Module):
         eps: float = 1e-6,
     ) -> None:
         super().__init__()
-        self.weight = nn.Parameter(torch.ones(hidden_size))
+        self.weight = nn.Parameter(torch.ones(hidden_size).to('hpu'))
         self.variance_epsilon = eps
 
     def _forward(
@@ -52,7 +52,7 @@ class RMSNorm(nn.Module):
         else:
             return x, residual
 
-    @torch.compiler.disable
+    #@torch.compiler.disable
     def forward(
         self,
         x: torch.Tensor,
@@ -62,8 +62,12 @@ class RMSNorm(nn.Module):
             if x.device.type == "hpu" and FusedRMSNorm:
                 orig_dtype = x.dtype
                 residual += x
-                x = FusedRMSNorm.apply(residual.float().to('hpu'), self.weight.float().to('hpu'), self.variance_epsilon)
-                return x.to(orig_dtype), residual
+                x = FusedRMSNorm.apply(residual.float(), self.weight.float(), self.variance_epsilon)
+                try:
+                    x = x.to(orig_dtype)
+                except:
+                    x = x.to(orig_dtype)
+                return x, residual
 
             ops.fused_add_rms_norm(
                 x,
@@ -75,8 +79,17 @@ class RMSNorm(nn.Module):
 
         if x.device.type == "hpu" and FusedRMSNorm:
             orig_dtype = x.dtype
-            x = FusedRMSNorm.apply(x.float().to('hpu'), self.weight.float().to('hpu'), self.variance_epsilon)
-            return x.to(orig_dtype)
+            x_in = x.float()
+            try:
+                print(x_in[0, 0, 0])
+            except:
+                pass
+            x = FusedRMSNorm.apply(x_in, self.weight.float(), self.variance_epsilon)
+            try:
+                x = x.to(orig_dtype)
+            except:
+                x = x.to(orig_dtype)
+            return x
 
         out = torch.empty_like(x)
         ops.rms_norm(
