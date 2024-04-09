@@ -29,7 +29,7 @@ class RMSNorm(nn.Module):
         eps: float = 1e-6,
     ) -> None:
         super().__init__()
-        self.weight = nn.Parameter(torch.ones(hidden_size))
+        self.weight = nn.Parameter(torch.ones(hidden_size).to('hpu'))
         self.variance_epsilon = eps
 
     def _forward(
@@ -64,7 +64,15 @@ class RMSNorm(nn.Module):
                 residual += x.view(residual.shape)
                 # Note: FusedRMSNorm requires 3D tensors as inputs
                 x = FusedRMSNorm.apply(residual.float(), self.weight.float(), self.variance_epsilon)
-                return x.to(orig_dtype).view(orig_shape), residual.view(orig_shape)
+                try:
+                    x = x.to(orig_dtype).view(orig_shape)
+                except:
+                    x = x.to(orig_dtype).view(orig_shape)
+                try:
+                    residual = residual.view(orig_shape)
+                except:
+                    residual = residual.view(orig_shape)
+                return x, residual
             ops.fused_add_rms_norm(
                 x,
                 residual,
@@ -75,7 +83,11 @@ class RMSNorm(nn.Module):
         if x.device.type == "hpu" and FusedRMSNorm:
             orig_dtype = x.dtype
             x = FusedRMSNorm.apply(x.float(), self.weight.float(), self.variance_epsilon)
-            return x.to(orig_dtype)
+            try:
+                x = x.to(orig_dtype)
+            except:
+                x = x.to(orig_dtype)
+            return x
         raise NotImplementedError("RMSNorm is required for HPU.")
         out = torch.empty_like(x)
         ops.rms_norm(

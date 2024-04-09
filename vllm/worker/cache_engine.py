@@ -7,6 +7,7 @@ from vllm.attention import get_attn_backend
 from vllm.config import CacheConfig, ModelConfig, ParallelConfig
 from vllm.logger import init_logger
 from vllm.utils import STR_DTYPE_TO_TORCH_DTYPE, is_pin_memory_available
+import habana_frameworks.torch as htorch
 
 logger = init_logger(__name__)
 
@@ -61,10 +62,11 @@ class CacheEngine:
         kv_cache: List[torch.Tensor] = []
         for _ in range(self.num_layers):
             kv_cache.append(
-                torch.empty(kv_cache_shape,
+                torch.zeros(kv_cache_shape,
                             dtype=self.dtype,
                             pin_memory=pin_memory,
                             device=device))
+        htorch.core.mark_step()
         return kv_cache
 
     def swap_in(self, src_to_dst: Dict[int, int]) -> None:

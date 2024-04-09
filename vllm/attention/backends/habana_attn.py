@@ -21,6 +21,10 @@ from vllm.utils import is_hip
 
 logger = init_logger(__name__)
 
+import math
+import os
+USE_FSDPA = (os.environ.get('USE_FSDPA', '0') == '1')
+
 
 class HabanaAttentionBackend(AttentionBackend):
 
@@ -234,11 +238,26 @@ class HabanaAttentionImpl(AttentionImpl):
 
                 if attn_metadata.attn_bias is None:
                     if self.alibi_slopes is None:
-                        attn_bias = BlockDiagonalCausalMask.from_seqlens(
-                            [seq_len] * batch_size)
-                        if self.sliding_window is not None:
-                            attn_bias = attn_bias.make_local_attention(
-                                self.sliding_window)
+                        if USE_FSDPA:
+                            attn_bias = BlockDiagonalCausalMask.from_seqlens(
+                                [seq_len] * batch_size)
+                            if self.sliding_window is not None:
+                                attn_bias = attn_bias.make_local_attention(
+                                    self.sliding_window)
+                        else:
+                            # TODO: Add support for alibi
+                            lens = torch.tensor(attn_metadata.prompt_lens, device=query.device, dtype=torch.int32)
+                            len_mask = (torch.arange(0, seq_len, device=query.device, dtype=torch.int32)
+                                        .view(1, seq_len)
+                                        .ge(lens.unsqueeze(-1))
+                                        .view(batch_size, 1, 1, seq_len))
+                            causal_mask = torch.triu(
+                                torch.ones((batch_size, 1, seq_len, seq_len), device=query.device, dtype=torch.bool),
+                                diagonal=1)
+                            mask = causal_mask.logical_or(len_mask)
+                            min_inf = -math.inf
+                            attn_bias = (torch.zeros_like(mask, dtype=query.dtype)
+                                         .masked_fill_(mask, min_inf))
                         attn_metadata.attn_bias = attn_bias
                     else:
                         attn_metadata.attn_bias = _make_alibi_bias(
@@ -246,7 +265,8 @@ class HabanaAttentionImpl(AttentionImpl):
                             seq_len, query.dtype)
                 query_shape = (batch_size, seq_len, self.num_kv_heads, self.num_queries_per_kv, self.head_size) if self.num_kv_heads != self.num_heads else (batch_size, seq_len, self.num_heads, self.head_size)
                 kv_shape = (batch_size, seq_len_kv, self.num_kv_heads, self.num_queries_per_kv, self.head_size) if self.num_kv_heads != self.num_heads else (batch_size, seq_len_kv, self.num_kv_heads, self.head_size)
-                out = xops.memory_efficient_attention_forward(
+                prompt_attn_impl = xops.memory_efficient_attention_forward if USE_FSDPA else xops.prompt_attention
+                out = prompt_attn_impl(
                     query.view(query_shape),
                     key.view(kv_shape),
                     value.view(kv_shape),

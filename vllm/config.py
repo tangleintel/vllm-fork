@@ -84,6 +84,7 @@ class ModelConfig:
         enforce_eager: bool = False,
         max_context_len_to_capture: Optional[int] = None,
         max_logprobs: int = 5,
+        compile_model: bool = False,
     ) -> None:
         self.model = model
         self.tokenizer = tokenizer
@@ -99,6 +100,7 @@ class ModelConfig:
         self.enforce_eager = enforce_eager
         self.max_context_len_to_capture = max_context_len_to_capture
         self.max_logprobs = max_logprobs
+        self.compile_model = compile_model
 
         if os.environ.get("VLLM_USE_MODELSCOPE", "False").lower() == "true":
             # download model from ModelScope hub,

@@ -17,6 +17,25 @@ except ImportError:
     print("Not using HPU fused scaled dot-product attention kernel.")
     FusedSDPA = None
 
+def prompt_attention(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attn_bias: Optional[torch.Tensor] = None,
+    p: float = 0.0,
+    scale: Optional[float] = None,
+) -> torch.Tensor:
+    min_inf = -float("inf")
+    query = query.transpose(1, 2)
+    key = key.transpose(1, 2)
+    value = value.transpose(1, 2)
+    attn_weights = torch.matmul(query * scale, key.transpose(-1, -2))
+    attn_weights.add_(attn_bias)
+    attn_weights = torch.softmax(attn_weights, dim=-1)
+    attn_weights = torch.matmul(attn_weights, value)
+    attn_weights = attn_weights.transpose(1, 2)
+    return attn_weights
+
 def memory_efficient_attention_forward(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -55,6 +74,10 @@ def memory_efficient_attention_forward(
             )
         htorch.core.mark_step()
         if dim == 4:
+            try:
+                print(out[0, 0, 0, 0])
+            except:
+                pass
             # [bs, heads, seq_len, head_dim] -> [bs, seq_len, heads, head_dim]
             out = out.permute(0, 2, 1, 3).reshape(bs, seq_len_q, heads, head_dim)
         elif dim == 5:

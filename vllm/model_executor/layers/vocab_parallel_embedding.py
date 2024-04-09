@@ -75,7 +75,7 @@ class VocabParallelEmbedding(torch.nn.Module):
         self.weight = Parameter(
             torch.empty(self.num_embeddings_per_partition,
                         self.embedding_dim,
-                        dtype=params_dtype))
+                        dtype=params_dtype).to('hpu'))
         set_weight_attrs(self.weight, {
             "parallel_dim": 0,
             "weight_loader": self.weight_loader

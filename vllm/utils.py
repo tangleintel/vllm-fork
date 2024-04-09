@@ -439,7 +439,11 @@ def async_tensor_h2d(
 ) -> torch.Tensor:
     """Asynchronously create a tensor and copy it from host to device."""
     t = torch.tensor(data, dtype=dtype, pin_memory=pin_memory, device="cpu")
-    return t.to(device=target_device, non_blocking=True)
+    try:
+        t = t.to(device=target_device, non_blocking=True)
+    except:
+        t = t.to(device=target_device, non_blocking=True)
+    return t
 
 
 def maybe_expand_dim(tensor: torch.Tensor,

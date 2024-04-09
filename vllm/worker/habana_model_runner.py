@@ -284,6 +284,10 @@ class HabanaModelRunner:
                      dtype=subquery_start_loc.dtype,
                      out=subquery_start_loc[1:])
 
+        try:
+            print(prompt_lens_tensor)
+        except:
+            pass
         torch.cumsum(prompt_lens_tensor,
                      dim=0,
                      dtype=seq_start_loc.dtype,
@@ -911,10 +915,14 @@ class CUDAGraphRunner:
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
 
+
 class FakeHPUGraphRunner:
 
     def __init__(self, model: nn.Module):
         self.model = model
+        self.graph = None
+        self.input_buffers: Dict[str, torch.Tensor] = {}
+        self.output_buffers: Dict[str, torch.Tensor] = {}
 
     def capture(
         self,
@@ -922,9 +930,10 @@ class FakeHPUGraphRunner:
         positions: torch.Tensor,
         kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
+        #memory_pool,
     ) -> None:
         return
-    
+
     def forward(
         self,
         input_ids: torch.Tensor,
@@ -933,14 +942,15 @@ class FakeHPUGraphRunner:
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
         return self.model(
-            input_ids,
-            positions,
+            input_ids.to('hpu'),
+            positions.to('hpu'),
             kv_caches,
             attn_metadata,
         )
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
+
 
 @contextlib.contextmanager
 def _maybe_cupy_nccl():
