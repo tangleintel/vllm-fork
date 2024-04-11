@@ -967,7 +967,7 @@ class HPUGraphRunner:
             kv_caches,
             attn_metadata,
         )
-        htorch.hpu.synchronize()
+        torch.hpu.synchronize()
 
         # Capture the graph.
         # NOTE(woosuk): Python 3.8 does not support multi-line with statements.
