@@ -37,18 +37,34 @@ logger = init_logger(__name__)
 
 _PAD_SLOT_ID = -1
 LORA_WARMUP_RANK = 8
-_BATCH_SIZE_ALIGNMENT = 8
+
+_DECODE_BATCH_SIZE_ALIGNMENT = 8
 # Capture graphs for token size 1, 2, 4, 8, 16, 24, 32, 40, ..., 256.
 # NOTE: _get_graph_batch_size needs to be updated if this list is changed.
-_BATCH_SIZES_TO_CAPTURE = [1, 2, 4] + [
-    _BATCH_SIZE_ALIGNMENT * i for i in range(1, 33)
+_DECODE_BATCH_SIZES_TO_CAPTURE = [1, 2, 4] + [
+    _DECODE_BATCH_SIZE_ALIGNMENT * i for i in range(1, 33)
 ]
 
 # Capture graphs for token size 1, 32, 64, 128, 256, 386 ... 4096
-_MAX_CONTEXT_LEN_ALIGNMENT = 128
-_MAX_CONTEXT_LENS_TO_CAPTURE = [1, 32, 64] + [
-    _MAX_CONTEXT_LEN_ALIGNMENT * i for i in range(1, 33)
+_DECODE_MAX_CONTEXT_LEN_ALIGNMENT = 128
+_DECODE_MAX_CONTEXT_LENS_TO_CAPTURE = [1, 32, 64] + [
+    _DECODE_MAX_CONTEXT_LEN_ALIGNMENT * i for i in range(1, 33)
 ]
+
+_PREFILL_BATCH_SIZE_ALIGNMENT = 8
+# Capture graphs for token size 1, 2, 4, 8, 16, 24, 32, 40, ..., 256.
+# NOTE: _get_graph_batch_size needs to be updated if this list is changed.
+_PREFILL_BATCH_SIZES_TO_CAPTURE = [1, 2, 4] + [
+    _PREFILL_BATCH_SIZE_ALIGNMENT * i for i in range(1, 33)
+]
+
+
+# Capture graphs for token size 1, 32, 64, 128, 256, 386 ... 4096
+_PREFILL_MAX_SEQ_LEN_ALIGNMENT = 128
+_PREFILL_MAX_SEQ_LENS_TO_CAPTURE = [1, 32, 64] + [
+    _PREFILL_MAX_SEQ_LEN_ALIGNMENT * i for i in range(1, 33)
+]
+
 
 
 class HabanaModelRunner:
@@ -80,8 +96,10 @@ class HabanaModelRunner:
         self.model = None
         self.block_size = None  # Set after initial profiling.
         self.lora_manager = None
-        self.graph_runner_class = HPUGraphRunner
-        self.graph_runners: Dict[Tuple[int, int], self.graph_runner_class] = {}
+        self.graph_runner_class = FakeHPUGraphRunner
+        self.prefill_graph_capture = True
+        self.prefill_graph_runners: Dict[Tuple[int, int], self.graph_runner_class] = {}
+        self.decode_graph_runners: Dict[Tuple[int, int], self.graph_runner_class] = {}
 
         self.max_context_len_to_capture = (
             self.model_config.max_context_len_to_capture
@@ -131,7 +149,7 @@ class HabanaModelRunner:
         self.block_size = block_size
 
         self.graph_block_tables = np.zeros(
-            (max(_BATCH_SIZES_TO_CAPTURE), self.get_max_block_per_batch()),
+            (max(_DECODE_BATCH_SIZES_TO_CAPTURE), self.get_max_block_per_batch()),
             dtype=np.int32)
 
     def get_max_block_per_batch(self) -> int:
@@ -239,6 +257,28 @@ class HabanaModelRunner:
        
         lora_index_mapping = lora_index_mapping
 
+        # HPUGraph handling
+        batch_size = len(input_tokens)
+        max_context_len = max(context_lens)
+        use_captured_graph = (
+            not self.model_config.enforce_eager
+            and batch_size <= _PREFILL_BATCH_SIZES_TO_CAPTURE[-1]
+            and max_context_len <= self.max_context_len_to_capture
+            and self.prefill_graph_capture)
+        if use_captured_graph:
+            graph_batch_size = _get_prefill_graph_batch_size(batch_size)
+            assert graph_batch_size >= batch_size
+            for _ in range(graph_batch_size - batch_size):
+                input_tokens.append([0])
+                input_positions.append([0])
+                slot_mapping.append([_PAD_SLOT_ID])
+                context_lens.append(1)
+                prompt_lens.append(1)
+                prefix_block_tables.append([])
+                lora_index_mapping.append(0)
+            batch_size = graph_batch_size
+
+
         context_lens_tensor = torch.tensor(context_lens,
                                            dtype=torch.int,
                                            device=self.device)
@@ -262,14 +302,33 @@ class HabanaModelRunner:
                                              dtype=torch.long,
                                              device=self.device)
 
-        # Prepare prefix block tables
-        block_tables = make_tensor_with_pad(
-            prefix_block_tables,
-            max_len=max_prompt_block_table_len,
-            pad=0,
-            dtype=torch.int,
-            device=self.device,
-        )
+        if use_captured_graph:
+            # When using cuda-graph all these tensors should be
+            # padded.
+            assert context_lens_tensor.shape[0] == input_tokens.shape[0]
+            assert context_lens_tensor.shape[0] == input_positions.shape[0]
+            assert context_lens_tensor.shape[0] == slot_mapping.shape[0]
+
+            # The shape of graph_block_tables is
+            # [max batch size, max context len // block size].
+            graph_max_seq_len  = _get_prefill_graph_max_seq_len(max_context_len)
+            assert graph_max_seq_len >= max_context_len
+            graph_block_count = math.ceil(graph_max_seq_len / self.block_size)
+            input_block_tables = self.graph_block_tables[:batch_size, :graph_block_count]
+            
+            for i, block_table in enumerate(prefix_block_tables):
+                if block_table:
+                    input_block_tables[i, :len(block_table)] = block_table
+            block_tables = torch.tensor(input_block_tables, device=self.device)
+        else:
+            # Prepare prefix block tables
+            block_tables = make_tensor_with_pad(
+                prefix_block_tables,
+                max_len=max_prompt_block_table_len,
+                pad=0,
+                dtype=torch.int,
+                device=self.device,
+            )
 
         # Query length can be shorter than key (i.e., prompt) when prefill
         # is chunked or prefix cached.
@@ -310,7 +369,7 @@ class HabanaModelRunner:
             seq_start_loc=seq_start_loc,
             context_lens=context_lens_tensor,
             block_tables=block_tables,
-            use_cuda_graph=False,
+            use_cuda_graph=use_captured_graph,
             kv_cache_dtype=self.kv_cache_dtype,
         )
         return (input_tokens, input_positions, attn_metadata, prompt_lens,
@@ -375,7 +434,7 @@ class HabanaModelRunner:
         max_context_len = max(context_lens)
         use_captured_graph = (
             not self.model_config.enforce_eager
-            and batch_size <= _BATCH_SIZES_TO_CAPTURE[-1]
+            and batch_size <= _DECODE_BATCH_SIZES_TO_CAPTURE[-1]
             and max_context_len <= self.max_context_len_to_capture)
         if use_captured_graph:
             graph_batch_size = _get_graph_batch_size(batch_size)
@@ -628,14 +687,26 @@ class HabanaModelRunner:
             self.set_active_loras(lora_requests, lora_mapping)
 
         # Execute the model.
-        if attn_metadata.use_cuda_graph:
+        import pdb; pdb.set_trace()
+        if attn_metadata.use_cuda_graph and not attn_metadata.is_prompt:
             graph_batch_size = input_tokens.shape[0]
             graph_block_count = attn_metadata.block_tables.shape[1] 
             graph_runner_key = (graph_batch_size, graph_block_count)
-            model_executable = self.graph_runners[graph_runner_key]
-            logger.info(f"Executing {self.graph_runner_class.__name__} with batch {graph_batch_size}, block_count {graph_block_count} (context_len up to {graph_block_count*self.block_size}, currently {torch.max(attn_metadata.context_lens).item()})")
+            model_executable = self.decode_graph_runners[graph_runner_key]
+            logger.info(f"[DECODE] Executing {self.graph_runner_class.__name__} with batch {graph_batch_size}, block_count {graph_block_count} (context_len up to {graph_block_count*self.block_size}, currently {torch.max(attn_metadata.context_lens).item()})")
+        elif attn_metadata.use_cuda_graph and attn_metadata.is_prompt:
+            graph_batch_size = input_tokens.shape[0]
+            graph_block_count = attn_metadata.block_tables.shape[1] 
+            graph_runner_key = (graph_batch_size, graph_block_count)
+            model_executable = self.prefill_graph_runners[graph_runner_key]
+            logger.info(f"[PREFILL] Executing {self.graph_runner_class.__name__} with batch {graph_batch_size}, block_count {graph_block_count} (context_len up to {graph_block_count*self.block_size}, currently {torch.max(attn_metadata.context_lens).item()})")
         else:
+            batch_size = input_tokens.shape[0]
+            block_count = attn_metadata.block_tables.shape[1] 
             model_executable = self.model
+            prefix_str = '[PREFILL]' if attn_metadata.is_prompt else '[DECODE]'
+            logger.info(f"{prefix_str} Executing eagerly with batch {batch_size}, block_count {block_count}, context_len {torch.max(attn_metadata.context_lens).item()})")
+
         hidden_states = model_executable(
             input_ids=input_tokens,
             positions=input_positions,
@@ -658,6 +729,7 @@ class HabanaModelRunner:
 
     @torch.inference_mode()
     def profile_run(self) -> None:
+        return
         # Enable top-k sampling to reflect the accurate memory usage.
         sampling_params = SamplingParams(top_p=0.99, top_k=self.vocab_size - 1)
         max_num_batched_tokens = self.scheduler_config.max_num_batched_tokens
@@ -766,20 +838,7 @@ class HabanaModelRunner:
                     "to decrease memory usage.")
         start_time = time.perf_counter()
 
-        # Prepare dummy inputs. These will be reused for all batch sizes.
-        max_batch_size = max(_BATCH_SIZES_TO_CAPTURE)
-        input_tokens = torch.zeros(max_batch_size, 1, dtype=torch.long).to('hpu')
-        input_positions = torch.zeros(max_batch_size, 1, dtype=torch.long).to('hpu')
-        slot_mapping = torch.zeros(max_batch_size, 1, dtype=torch.long).to('hpu') # TODO(kzawora): when using torch.empty, following occurs: RuntimeError: Error when trying to cast Long to Int, Input values range [0, 139632108750000] exceeds Int range [-2147483648, 2147483647]
-        slot_mapping.fill_(_PAD_SLOT_ID)
-        context_lens = torch.ones(max_batch_size, dtype=torch.int32).to('hpu')
-        block_tables = torch.from_numpy(self.graph_block_tables).to('hpu')
 
-        graph_batch_size = _get_graph_batch_size(
-            self.scheduler_config.max_num_seqs)
-        batch_size_capture_list = [
-            bs for bs in _BATCH_SIZES_TO_CAPTURE if bs <= graph_batch_size
-        ]
 
         # NOTE(woosuk): There are 3 backends for all-reduce: custom all-reduce
         # kernel, CuPy NCCL, and PyTorch NCCL. When using CUDA graph, we use
@@ -788,60 +847,9 @@ class HabanaModelRunner:
         # We always prioritize using custom all-reduce kernel but fall back
         # to PyTorch or CuPy NCCL if it is disabled or not supported.
         with custom_all_reduce.capture():
-            # NOTE: Capturing the largest batch size first may help reduce the
-            # memory usage of CUDA graph.
-            for idx, (batch_size, max_context_len) in enumerate(itertools.product(reversed(_BATCH_SIZES_TO_CAPTURE), reversed(_MAX_CONTEXT_LENS_TO_CAPTURE))): 
-                block_count = math.ceil(max_context_len / self.block_size)
-                # Skip capture of "out-of-bound" batch sizes and context lengths
-                if batch_size > self.scheduler_config.max_num_seqs:
-                    logger.info(f"[{idx}/{len(_BATCH_SIZES_TO_CAPTURE)*len(_MAX_CONTEXT_LENS_TO_CAPTURE)}] Skipping capture of GraphRunner for batch {batch_size}, max_context_len {max_context_len}, block_count {block_count}. Reason: Batch out of bound.")
-                    continue 
-                if max_context_len > self.max_context_len_to_capture:
-                    logger.info(f"[{idx}/{len(_BATCH_SIZES_TO_CAPTURE)*len(_MAX_CONTEXT_LENS_TO_CAPTURE)}] Skipping capture of GraphRunner for batch {batch_size}, max_context_len {max_context_len}, block_count {block_count}. Reason: Nax context length out of bound.")
-                    continue
-                captured_block_counts = [bc for (n, bc) in self.graph_runners if n == batch_size]
-                if block_count in captured_block_counts:
-                    logger.info(f"[{idx}/{len(_BATCH_SIZES_TO_CAPTURE)*len(_MAX_CONTEXT_LENS_TO_CAPTURE)}] Skipping capture of GraphRunner for batch {batch_size}, max_context_len {max_context_len}, block_count {block_count}. Reason: Block size already captured.")
-                    continue
-                
-                # Create dummy attn_metadata.
-                attn_metadata = self.attn_backend.make_metadata(
-                    is_prompt=False,
-                    slot_mapping=slot_mapping[:batch_size],
-                    prompt_lens=None,
-                    prompt_lens_tensor=None,
-                    num_prompt_tokens=0,
-                    num_generation_tokens=batch_size,
-                    max_subquery_len=None,
-                    max_context_len=block_count*self.block_size,
-                    max_prompt_len=None,
-                    subquery_start_loc=None,
-                    seq_start_loc=None,
-                    context_lens=context_lens[:batch_size],
-                    block_tables=block_tables[:batch_size, :block_count],
-                    use_cuda_graph=True,
-                    kv_cache_dtype=self.kv_cache_dtype,
-                )
-
-                if self.lora_config:
-                    lora_mapping = LoRAMapping(
-                        [0] * batch_size,
-                        [0] * batch_size,
-                    )
-                    self.set_active_loras(set(), lora_mapping)
-                
-                graph_runner = self.graph_runner_class(self.model)
-                logger.info(f"[{idx}/{len(_BATCH_SIZES_TO_CAPTURE)*len(_MAX_CONTEXT_LENS_TO_CAPTURE)}] Capturing GraphRunner for batch {batch_size}, max_context_len {max_context_len}, block_count {block_count}...")
-                capture_start = time.time()
-                graph_runner.capture(
-                    input_tokens[:batch_size],
-                    input_positions[:batch_size],
-                    kv_caches,
-                    attn_metadata,
-                )
-                self.graph_runners[(batch_size, block_count)] = graph_runner
-                capture_end = time.time()
-                logger.info(f"[{idx}/{len(_BATCH_SIZES_TO_CAPTURE)*len(_MAX_CONTEXT_LENS_TO_CAPTURE)}]  Capturing GraphRunner for batch {batch_size}, max_context_len {max_context_len}, block_count {block_count}... done in {capture_end-capture_start:.2f} seconds!")
+            if self.prefill_graph_capture:
+                self._capture_prefill_graphs(kv_caches)
+            self._capture_decode_graphs(kv_caches)
 
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
@@ -853,12 +861,162 @@ class HabanaModelRunner:
         # NOTE(woosuk): This is necessary because otherwise deadlocks can
         # happen.
         # FIXME(woosuk): This is a bit hacky. Find a more robust solution.
-        self.graph_runners.clear()
+        self.decode_graph_runners.clear()
         self.cupy_nccl_backend = None
 
     @property
     def vocab_size(self) -> int:
         return self.model_config.get_vocab_size()
+
+    def _capture_decode_graphs(self, kv_caches):
+        # Prepare dummy inputs. These will be reused for all batch sizes.
+        max_batch_size = max(_DECODE_BATCH_SIZES_TO_CAPTURE)
+        input_tokens = torch.zeros(max_batch_size, 1, dtype=torch.long).to('hpu')
+        input_positions = torch.zeros(max_batch_size, 1, dtype=torch.long).to('hpu')
+        slot_mapping = torch.zeros(max_batch_size, 1, dtype=torch.long).to('hpu') # TODO(kzawora): when using torch.empty, following occurs: RuntimeError: Error when trying to cast Long to Int, Input values range [0, 139632108750000] exceeds Int range [-2147483648, 2147483647]
+        slot_mapping.fill_(_PAD_SLOT_ID)
+        context_lens = torch.ones(max_batch_size, dtype=torch.int32).to('hpu')
+        block_tables = torch.from_numpy(self.graph_block_tables).to('hpu')
+
+        # NOTE: Capturing the largest batch size first may help reduce the
+        # memory usage of CUDA graph.
+        for idx, (batch_size, max_context_len) in enumerate(itertools.product(reversed(_DECODE_BATCH_SIZES_TO_CAPTURE), reversed(_DECODE_MAX_CONTEXT_LENS_TO_CAPTURE))): 
+            block_count = math.ceil(max_context_len / self.block_size)
+            # Skip capture of "out-of-bound" batch sizes and context lengths
+            if batch_size > self.scheduler_config.max_num_seqs:
+                logger.info(f"[DECODE: {idx}/{len(_DECODE_BATCH_SIZES_TO_CAPTURE)*len(_DECODE_MAX_CONTEXT_LENS_TO_CAPTURE)}] Skipping capture of GraphRunner for batch {batch_size}, max_context_len {max_context_len}, block_count {block_count}. Reason: Batch out of bound.")
+                continue 
+            if max_context_len > self.max_context_len_to_capture:
+                logger.info(f"[DECODE: {idx}/{len(_DECODE_BATCH_SIZES_TO_CAPTURE)*len(_DECODE_MAX_CONTEXT_LENS_TO_CAPTURE)}] Skipping capture of GraphRunner for batch {batch_size}, max_context_len {max_context_len}, block_count {block_count}. Reason: Nax context length out of bound.")
+                continue
+            captured_block_counts = [bc for (n, bc) in self.decode_graph_runners if n == batch_size]
+            if block_count in captured_block_counts:
+                logger.info(f"[DECODE: {idx}/{len(_DECODE_BATCH_SIZES_TO_CAPTURE)*len(_DECODE_MAX_CONTEXT_LENS_TO_CAPTURE)}] Skipping capture of GraphRunner for batch {batch_size}, max_context_len {max_context_len}, block_count {block_count}. Reason: Block size already captured.")
+                continue
+            
+            # Create dummy attn_metadata.
+            attn_metadata = self.attn_backend.make_metadata(
+                is_prompt=False,
+                slot_mapping=slot_mapping[:batch_size],
+                prompt_lens=None,
+                prompt_lens_tensor=None,
+                num_prompt_tokens=0,
+                num_generation_tokens=batch_size,
+                max_subquery_len=None,
+                max_context_len=block_count*self.block_size,
+                max_prompt_len=None,
+                subquery_start_loc=None,
+                seq_start_loc=None,
+                context_lens=context_lens[:batch_size],
+                block_tables=block_tables[:batch_size, :block_count],
+                use_cuda_graph=True,
+                kv_cache_dtype=self.kv_cache_dtype,
+            )
+
+            if self.lora_config:
+                lora_mapping = LoRAMapping(
+                    [0] * batch_size,
+                    [0] * batch_size,
+                )
+                self.set_active_loras(set(), lora_mapping)
+            
+            graph_runner = self.graph_runner_class(self.model)
+            logger.info(f"[DECODE: {idx}/{len(_DECODE_BATCH_SIZES_TO_CAPTURE)*len(_DECODE_MAX_CONTEXT_LENS_TO_CAPTURE)}] Capturing GraphRunner for batch {batch_size}, max_context_len {max_context_len}, block_count {block_count}...")
+            capture_start = time.time()
+            graph_runner.capture(
+                input_tokens[:batch_size],
+                input_positions[:batch_size],
+                kv_caches,
+                attn_metadata,
+            )
+            self.decode_graph_runners[(batch_size, block_count)] = graph_runner
+            capture_end = time.time()
+            logger.info(f"[DECODE: {idx}/{len(_DECODE_BATCH_SIZES_TO_CAPTURE)*len(_DECODE_MAX_CONTEXT_LENS_TO_CAPTURE)}] Capturing GraphRunner for batch {batch_size}, max_context_len {max_context_len}, block_count {block_count}... done in {capture_end-capture_start:.2f} seconds!")
+
+    def _capture_prefill_graphs(self, kv_caches):
+        # Prepare dummy inputs. These will be reused for all batch sizes.
+        max_batch_size = max(_PREFILL_BATCH_SIZES_TO_CAPTURE)
+        max_seq_len = max(_PREFILL_MAX_SEQ_LENS_TO_CAPTURE)
+        input_tokens = torch.zeros(max_batch_size, max_seq_len, dtype=torch.long).to('hpu')
+        input_positions = torch.zeros(max_batch_size, max_seq_len, dtype=torch.long).to('hpu')
+        slot_mapping = torch.zeros(max_batch_size, max_seq_len, dtype=torch.long).to('hpu') # TODO(kzawora): when using torch.empty, following occurs: RuntimeError: Error when trying to cast Long to Int, Input values range [0, 139632108750000] exceeds Int range [-2147483648, 2147483647]
+        slot_mapping.fill_(_PAD_SLOT_ID)
+        context_lens = torch.ones(max_batch_size, dtype=torch.int32).to('hpu') * max_seq_len
+        block_tables = torch.from_numpy(self.graph_block_tables).to('hpu')
+
+        # NOTE: Capturing the largest batch size first may help reduce the
+        # memory usage of CUDA graph.
+        for idx, (batch_size, max_seq_len) in enumerate(itertools.product(reversed(_PREFILL_BATCH_SIZES_TO_CAPTURE), reversed(_PREFILL_MAX_SEQ_LENS_TO_CAPTURE))): 
+            block_count = math.ceil(max_seq_len / self.block_size)
+            # Skip capture of "out-of-bound" batch sizes and context lengths
+            if batch_size > self.scheduler_config.max_num_seqs:
+                logger.info(f"[PREFILL: {idx}/{len(_PREFILL_BATCH_SIZES_TO_CAPTURE)*len(_PREFILL_MAX_SEQ_LENS_TO_CAPTURE)}] Skipping capture of GraphRunner for batch {batch_size}, max_seq_len {max_seq_len}, block_count {block_count}. Reason: Batch out of bound.")
+                continue 
+            if max_seq_len > self.max_context_len_to_capture:
+                logger.info(f"[PREFILL: {idx}/{len(_PREFILL_BATCH_SIZES_TO_CAPTURE)*len(_PREFILL_MAX_SEQ_LENS_TO_CAPTURE)}] Skipping capture of GraphRunner for batch {batch_size}, max_seq_len {max_seq_len}, block_count {block_count}. Reason: Nax context length out of bound.")
+                continue
+            captured_block_counts = [bc for (n, bc) in self.decode_graph_runners if n == batch_size]
+            if block_count in captured_block_counts:
+                logger.info(f"[PREFILL: {idx}/{len(_PREFILL_BATCH_SIZES_TO_CAPTURE)*len(_PREFILL_MAX_SEQ_LENS_TO_CAPTURE)}] Skipping capture of GraphRunner for batch {batch_size}, max_seq_len {max_seq_len}, block_count {block_count}. Reason: Block size already captured.")
+                continue
+
+            # Create dummy attn_metadata.
+            attn_metadata = self.attn_backend.make_metadata(
+                is_prompt=True,
+                slot_mapping=slot_mapping[:batch_size],
+                prompt_lens=context_lens[:batch_size].tolist(),
+                prompt_lens_tensor=context_lens[:batch_size],
+                num_prompt_tokens=len(input_tokens.flatten()),
+                num_generation_tokens=0,
+                max_subquery_len=max(context_lens),
+                max_context_len=None,
+                max_prompt_len=max(context_lens),
+                subquery_start_loc=torch.zeros_like(context_lens),
+                seq_start_loc=None,
+                context_lens=context_lens[:batch_size],
+                block_tables=block_tables[:batch_size, :block_count],
+                use_cuda_graph=True,
+                kv_cache_dtype=self.kv_cache_dtype,
+            )
+            
+            _attn_metadata = self.attn_backend.make_metadata(
+                is_prompt=False,
+                slot_mapping=slot_mapping[:batch_size],
+                prompt_lens=None,
+                prompt_lens_tensor=None,
+                num_prompt_tokens=0,
+                num_generation_tokens=batch_size,
+                max_subquery_len=None,
+                max_context_len=block_count*self.block_size,
+                max_prompt_len=None,
+                subquery_start_loc=None,
+                seq_start_loc=None,
+                context_lens=context_lens[:batch_size],
+                block_tables=block_tables[:batch_size, :block_count],
+                use_cuda_graph=True,
+                kv_cache_dtype=self.kv_cache_dtype,
+            )
+
+            if self.lora_config:
+                lora_mapping = LoRAMapping(
+                    [0] * batch_size,
+                    [0] * batch_size,
+                )
+                self.set_active_loras(set(), lora_mapping)
+            
+            graph_runner = self.graph_runner_class(self.model)
+            logger.info(f"[PREFILL: {idx}/{len(_PREFILL_BATCH_SIZES_TO_CAPTURE)*len(_PREFILL_MAX_SEQ_LENS_TO_CAPTURE)}] Capturing GraphRunner for batch {batch_size}, max_seq_len {max_seq_len}, block_count {block_count}...")
+            capture_start = time.time()
+            graph_runner.capture(
+                input_tokens[:batch_size],
+                input_positions[:batch_size],
+                None,
+                attn_metadata,
+            )
+            self.prefill_graph_runners[(batch_size, block_count)] = graph_runner
+            capture_end = time.time()
+            logger.info(f"[PREFILL: {idx}/{len(_PREFILL_BATCH_SIZES_TO_CAPTURE)*len(_PREFILL_MAX_SEQ_LENS_TO_CAPTURE)}] Capturing GraphRunner for batch {batch_size}, max_seq_len {max_seq_len}, block_count {block_count}... done in {capture_end-capture_start:.2f} seconds!")
+
 
 
 class FakeHPUGraphRunner:
@@ -992,8 +1150,8 @@ def _get_graph_batch_size(batch_size: int) -> int:
     elif batch_size <= 4:
         return 4
     else:
-        return ((batch_size + _BATCH_SIZE_ALIGNMENT - 1) //
-                _BATCH_SIZE_ALIGNMENT * _BATCH_SIZE_ALIGNMENT)
+        return ((batch_size + _DECODE_BATCH_SIZE_ALIGNMENT - 1) //
+                _DECODE_BATCH_SIZE_ALIGNMENT * _DECODE_BATCH_SIZE_ALIGNMENT)
 
 
 def _get_graph_max_context_len(max_context_len: int) -> int:
@@ -1007,5 +1165,34 @@ def _get_graph_max_context_len(max_context_len: int) -> int:
     elif max_context_len <= 64:
         return 64
     else:
-        return ((max_context_len + _MAX_CONTEXT_LEN_ALIGNMENT - 1) //
-                _MAX_CONTEXT_LEN_ALIGNMENT * _MAX_CONTEXT_LEN_ALIGNMENT)
+        return ((max_context_len + _DECODE_MAX_CONTEXT_LEN_ALIGNMENT - 1) //
+                _DECODE_MAX_CONTEXT_LEN_ALIGNMENT * _DECODE_MAX_CONTEXT_LEN_ALIGNMENT)
+        
+
+def _get_prefill_graph_batch_size(batch_size: int) -> int:
+    """Returns the padded batch size given actual batch size.
+
+    Batch sizes are 1, 2, 4, _BATCH_SIZE_ALIGNMENT,
+    2*_BATCH_SIZE_ALIGNMENT, 3*_BATCH_SIZE_ALIGNMENT...
+    """
+    if batch_size <= 2:
+        return batch_size
+    elif batch_size <= 4:
+        return 4
+    else:
+        return ((batch_size + _PREFILL_BATCH_SIZE_ALIGNMENT - 1) //
+                _PREFILL_BATCH_SIZE_ALIGNMENT * _PREFILL_BATCH_SIZE_ALIGNMENT)
+
+def _get_prefill_graph_max_seq_len(max_seq_len: int) -> int:
+    """Returns the padded batch size given actual batch size.
+
+    Batch sizes are 1, 2, 4, _BATCH_SIZE_ALIGNMENT,
+    2*_BATCH_SIZE_ALIGNMENT, 3*_BATCH_SIZE_ALIGNMENT...
+    """
+    if max_seq_len <= 32:
+        return 32
+    elif max_seq_len <= 64:
+        return 64
+    else:
+        return ((max_seq_len + _PREFILL_MAX_SEQ_LEN_ALIGNMENT - 1) //
+                _PREFILL_MAX_SEQ_LEN_ALIGNMENT * _PREFILL_MAX_SEQ_LEN_ALIGNMENT)
