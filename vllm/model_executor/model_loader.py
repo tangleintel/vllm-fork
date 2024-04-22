@@ -87,7 +87,7 @@ def get_model(model_config: ModelConfig, device_config: DeviceConfig,
             # Load the weights from the cached or downloaded files.
             model.load_weights(model_config.model, model_config.download_dir,
                                model_config.load_format, model_config.revision)
-    if model_config.compile_model:
+    if False:  # model_config.compile_model:
         return torch.compile(model.eval(), backend='inductor')
     else:
         return model.eval()

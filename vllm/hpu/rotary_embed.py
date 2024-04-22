@@ -110,10 +110,16 @@ class HpuRotaryEmbedding(nn.Module):
         cos, sin = self.cos_cached[:seq_len].to(dtype=query.dtype), self.sin_cached[:seq_len].to(dtype=query.dtype)
         query = query.reshape((query.shape[0], query.shape[1], query.shape[2] // self.head_size, self.head_size))
         key = key.reshape((key.shape[0], key.shape[1], key.shape[2] // self.head_size, self.head_size))
-        if query.device.type == "hpu" and FusedRoPE:
+        if True:  # query.device.type == "hpu" and FusedRoPE:
             if len(positions[0]) == 1:
-                cos = self.cos_cached[positions].unsqueeze(2).to(dtype=query.dtype)
-                sin = self.sin_cached[positions].unsqueeze(2).to(dtype=query.dtype)
+                cos = self.cos_cached[positions].unsqueeze(2)
+                sin = self.sin_cached[positions].unsqueeze(2)
+                try:
+                    cos = cos.to(dtype=query.dtype)
+                    sin = sin.to(dtype=query.dtype)
+                except:
+                    cos = cos.to(dtype=query.dtype)
+                    sin = sin.to(dtype=query.dtype)
             else:
                 cos = cos[positions].unsqueeze(2)
                 sin = sin[positions].unsqueeze(2)

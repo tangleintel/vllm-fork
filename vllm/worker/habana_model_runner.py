@@ -33,13 +33,13 @@ from vllm.utils import (HabanaMemoryProfiler, async_tensor_h2d,
 
 logger = init_logger(__name__)
 
-_PAD_SLOT_ID = -1
+_PAD_SLOT_ID = 0
 LORA_WARMUP_RANK = 8
 _BATCH_SIZE_ALIGNMENT = 8
 # Capture graphs for token size 1, 2, 4, 8, 16, 24, 32, 40, ..., 256.
 # NOTE: _get_graph_batch_size needs to be updated if this list is changed.
 _BATCH_SIZES_TO_CAPTURE = [1, 2, 4] + [
-    _BATCH_SIZE_ALIGNMENT * i for i in range(1, 33)
+    _BATCH_SIZE_ALIGNMENT * i for i in range(1, 2)
 ]
 
 
@@ -73,7 +73,7 @@ class HabanaModelRunner:
         self.block_size = None  # Set after initial profiling.
         self.lora_manager = None
         self.graph_runner_class = FakeHPUGraphRunner
-        self.graph_runners: Dict[int, self.graph_runner_class] = {}
+        self.graph_runners: self.graph_runner_class = None
 
         self.max_context_len_to_capture = (
             self.model_config.max_context_len_to_capture
@@ -622,7 +622,7 @@ class HabanaModelRunner:
         # Execute the model.
         if attn_metadata.use_cuda_graph:
             graph_batch_size = input_tokens.shape[0]
-            model_executable = self.graph_runners[graph_batch_size]
+            model_executable = self.graph_runners
         else:
             model_executable = self.model
         hidden_states = model_executable(
@@ -757,11 +757,12 @@ class HabanaModelRunner:
 
         # Prepare dummy inputs. These will be reused for all batch sizes.
         max_batch_size = max(_BATCH_SIZES_TO_CAPTURE)
-        input_tokens = torch.zeros(max_batch_size, dtype=torch.long).to('hpu')
-        input_positions = torch.zeros(max_batch_size, dtype=torch.long).to('hpu')
-        slot_mapping = torch.zeros(max_batch_size, dtype=torch.long).to('hpu') # TODO(kzawora): when using torch.empty, following occurs: RuntimeError: Error when trying to cast Long to Int, Input values range [0, 139632108750000] exceeds Int range [-2147483648, 2147483647]
+        input_tokens = torch.zeros((max_batch_size, 1), dtype=torch.long).to('hpu')
+        input_positions = torch.zeros((max_batch_size, 1), dtype=torch.long).to('hpu')
+        slot_mapping = torch.zeros((max_batch_size, 1), dtype=torch.long).to('hpu') # TODO(kzawora): when using torch.empty, following occurs: RuntimeError: Error when trying to cast Long to Int, Input values range [0, 139632108750000] exceeds Int range [-2147483648, 2147483647]
         slot_mapping.fill_(_PAD_SLOT_ID)
-        context_lens = torch.ones(max_batch_size, dtype=torch.int32).to('hpu')
+        context_lens = torch.arange(1, max_batch_size + 1, dtype=torch.int32).to('hpu')
+        context_lens[-1] = self.max_context_len_to_capture
         block_tables = torch.from_numpy(self.graph_block_tables).to('hpu')
 
         graph_batch_size = _get_graph_batch_size(
@@ -813,7 +814,7 @@ class HabanaModelRunner:
                     kv_caches,
                     attn_metadata,
                 )
-                self.graph_runners[batch_size] = graph_runner
+                self.graph_runners = graph_runner
 
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
@@ -825,7 +826,7 @@ class HabanaModelRunner:
         # NOTE(woosuk): This is necessary because otherwise deadlocks can
         # happen.
         # FIXME(woosuk): This is a bit hacky. Find a more robust solution.
-        self.graph_runners.clear()
+        #self.graph_runners.clear()
         self.cupy_nccl_backend = None
 
     @property
@@ -932,6 +933,15 @@ class FakeHPUGraphRunner:
         attn_metadata: AttentionMetadata,
         #memory_pool,
     ) -> None:
+        print(f'Capture metadata: {attn_metadata}')
+        print(f'Input sizes: {input_ids.shape}, {positions.shape}')
+        self.graph = torch.compile(self.model, backend='hpu_backend')
+        self.graph(
+            input_ids.to('hpu'),
+            positions.to('hpu'),
+            kv_caches,
+            attn_metadata,
+        )
         return
 
     def forward(
@@ -941,7 +951,9 @@ class FakeHPUGraphRunner:
         kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        return self.model(
+        #print(f'Run metadata: {attn_metadata}')
+        #print(f'Input sizes: {input_ids.shape}, {positions.shape}')
+        return self.graph(
             input_ids.to('hpu'),
             positions.to('hpu'),
             kv_caches,

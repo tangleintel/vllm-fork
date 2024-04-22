@@ -58,7 +58,7 @@ class RMSNorm(nn.Module):
         residual: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         if residual is not None:
-            if x.device.type == "hpu" and FusedRMSNorm:
+            if True:  # x.device.type == "hpu" and FusedRMSNorm:
                 orig_dtype = x.dtype
                 orig_shape = x.shape
                 residual += x.view(residual.shape)
@@ -80,7 +80,7 @@ class RMSNorm(nn.Module):
                 self.variance_epsilon,
             )
             return x, residual
-        if x.device.type == "hpu" and FusedRMSNorm:
+        if True:  # x.device.type == "hpu" and FusedRMSNorm:
             orig_dtype = x.dtype
             x = FusedRMSNorm.apply(x.float(), self.weight.float(), self.variance_epsilon)
             try:

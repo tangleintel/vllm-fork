@@ -180,8 +180,7 @@ class EngineArgs:
             help='If specified, use nsight to profile ray workers')
         parser.add_argument(
             '--compile-model',
-            type=bool,
-            default=False,
+            action='store_true',
             help='use torch.compile')
         # KV cache arguments
         parser.add_argument('--block-size',
