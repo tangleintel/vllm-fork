@@ -527,7 +527,7 @@ class SchedulerConfig:
         max_num_batched_tokens: Optional[int],
         max_num_seqs: int,
         max_model_len: int,
-        delay_factor: float = 0.0,
+        delay_factor: float = 2.0, # TODO(kzawora): remove this
     ) -> None:
         if max_num_batched_tokens is not None:
             self.max_num_batched_tokens = max_num_batched_tokens
