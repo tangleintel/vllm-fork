@@ -18,6 +18,7 @@ import torch
 import torch.nn as nn
 import habana_frameworks.torch as htorch
 
+from vllm.attention.backends.habana_attn import HabanaAttentionMetadata
 from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.config import (DeviceConfig, LoRAConfig, ModelConfig, ParallelConfig,
                          SchedulerConfig)
@@ -85,7 +86,7 @@ class HabanaModelRunner:
         self.model = None
         self.block_size = None  # Set after initial profiling.
         self.lora_manager = None
-        self.graph_runner_class = FakeHPUGraphRunnerWithWarmup
+        self.graph_runner_class = HPUGraphRunner
         self.graph_runners: Dict[Tuple[int, int], self.graph_runner_class] = {}
 
         self.max_context_len_to_capture = (
@@ -955,13 +956,10 @@ class FakeHPUGraphRunnerWithWarmup:
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
-class HPUGraphRunner:
 
+class HPUGraphRunner:
     def __init__(self, model: nn.Module):
         self.model = model
-        self.graph = None
-        self.input_buffers: Dict[str, torch.Tensor] = {}
-        self.output_buffers: Dict[str, torch.Tensor] = {}
 
     def capture(
         self,
@@ -970,43 +968,45 @@ class HPUGraphRunner:
         kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
     ) -> None:
-        assert self.graph is None
-        # Run the model once without capturing the graph.
-        # This is to make sure that the captured graph does not include the
-        # kernel launches for initial benchmarking (e.g., Triton autotune).
-        self.model(
+        class ModelWrapper(torch.nn.Module):
+            def __init__(self, model):
+                super().__init__()
+                self.model = model
+            def forward(self, input_ids, positions, kv_caches, slot_mapping, context_lens, block_tables):
+                wrapper_attn_metadata = HabanaAttentionMetadata(
+                    is_prompt=attn_metadata.is_prompt,
+                    slot_mapping=slot_mapping,
+                    prompt_lens=None,
+                    prompt_lens_tensor=None,
+                    num_prompt_tokens=0,
+                    num_generation_tokens=attn_metadata.num_generation_tokens,
+                    max_subquery_len=None,
+                    max_context_len=attn_metadata.max_context_len,
+                    max_prompt_len=None,
+                    subquery_start_loc=None,
+                    seq_start_loc=None,
+                    context_lens=context_lens,
+                    block_tables=block_tables,
+                    use_cuda_graph=True,
+                    kv_cache_dtype=attn_metadata.kv_cache_dtype,
+                )
+                return self.model(
+                    input_ids,
+                    positions,
+                    kv_caches,
+                    wrapper_attn_metadata
+                )
+        self.graph_model = htorch.hpu.wrap_in_hpu_graph(ModelWrapper(self.model))
+        out = self.graph_model(
             input_ids,
             positions,
             kv_caches,
-            attn_metadata,
+            attn_metadata.slot_mapping,
+            attn_metadata.context_lens, 
+            attn_metadata.block_tables,
         )
-        htorch.hpu.synchronize()
-
-        # Capture the graph.
-        # NOTE(woosuk): Python 3.8 does not support multi-line with statements.
-        # https://stackoverflow.com/questions/31039022/python-multi-line-with-statement
-        self.graph = htorch.hpu.HPUGraph()
-        with htorch.hpu.graph(self.graph):  # noqa: SIM117
-            hidden_states = self.model(
-                input_ids,
-                positions,
-                kv_caches,
-                attn_metadata,
-            )
-        torch.hpu.synchronize()
-
-        # Save the input and output buffers.
-        self.input_buffers = {
-            "input_ids": input_ids,
-            "positions": positions,
-            "kv_caches": kv_caches,
-            "slot_mapping": attn_metadata.slot_mapping,
-            "context_lens": attn_metadata.context_lens,
-            "block_tables": attn_metadata.block_tables,
-        }
-        self.output_buffers = {"hidden_states": hidden_states}
         return
-
+    
     def forward(
         self,
         input_ids: torch.Tensor,
@@ -1014,26 +1014,15 @@ class HPUGraphRunner:
         kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        # KV caches are fixed tensors, so we don't need to copy them.
-        del kv_caches
-
-        # Copy the input tensors to the input buffers.
-        self.input_buffers["input_ids"].copy_(input_ids, non_blocking=True)
-        self.input_buffers["positions"].copy_(positions, non_blocking=True)
-        self.input_buffers["slot_mapping"].copy_(attn_metadata.slot_mapping,
-                                                 non_blocking=True)
-        self.input_buffers["context_lens"].copy_(attn_metadata.context_lens,
-                                                 non_blocking=True)
-        self.input_buffers["block_tables"].copy_(attn_metadata.block_tables,
-                                                 non_blocking=True)
-        # Run the graph.
-        self.graph.replay()
-
-        # Return the output tensor.
-        return self.output_buffers["hidden_states"]
-
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
+        out = self.graph_model(
+            input_ids,
+            positions,
+            kv_caches,
+            attn_metadata.slot_mapping,
+            attn_metadata.context_lens, 
+            attn_metadata.block_tables,
+        )
+        return out
     
 @contextlib.contextmanager
 def _maybe_cupy_nccl():
