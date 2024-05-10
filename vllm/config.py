@@ -602,6 +602,7 @@ class SchedulerConfig:
         num_lookahead_slots: int = 0,
         delay_factor: float = 0.0,
         enable_chunked_prefill: bool = False,
+        queue_headroom: int = 0,
     ) -> None:
         if max_num_batched_tokens is not None:
             self.max_num_batched_tokens = max_num_batched_tokens
@@ -623,6 +624,7 @@ class SchedulerConfig:
         self.num_lookahead_slots = num_lookahead_slots
         self.delay_factor = delay_factor
         self.chunked_prefill_enabled = enable_chunked_prefill
+        self.queue_headroom = queue_headroom
 
         self._verify_args()
 
@@ -648,6 +650,11 @@ class SchedulerConfig:
                 "num_lookahead_slots "
                 f"({self.num_lookahead_slots}) must be greater than or "
                 "equal to 0.")
+
+        if self.queue_headroom >= self.max_num_seqs:
+            raise ValueError(
+                f'queue_headroom ({self.queue_headroom}) must be lower than max_num_seqs ({self.max_num_seqs}).'
+            )
 
 
 class DeviceConfig:

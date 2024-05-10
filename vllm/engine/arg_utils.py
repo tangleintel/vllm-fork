@@ -76,6 +76,7 @@ class EngineArgs:
     image_input_shape: Optional[str] = None
     image_feature_size: Optional[int] = None
     scheduler_delay_factor: float = 0.0
+    scheduler_queue_headroom: int = 0
     enable_chunked_prefill: bool = False
 
     guided_decoding_backend: str = 'outlines'
@@ -440,6 +441,11 @@ class EngineArgs:
             help='Apply a delay (of delay factor multiplied by previous'
             'prompt latency) before scheduling next prompt.')
         parser.add_argument(
+            '--scheduler-queue-headroom',
+            type=int,
+            default=EngineArgs.scheduler_queue_headroom,
+            help='Avoids scheduling new prefills until scheduler running queue has enough headroom.')
+        parser.add_argument(
             '--enable-chunked-prefill',
             action='store_true',
             help='If set, the prefill requests can be chunked based on the '
@@ -563,6 +569,7 @@ class EngineArgs:
                                  if speculative_config is None else
                                  speculative_config.num_lookahead_slots),
             delay_factor=self.scheduler_delay_factor,
+            queue_headroom=self.scheduler_queue_headroom,
             enable_chunked_prefill=self.enable_chunked_prefill,
         )
         lora_config = LoRAConfig(

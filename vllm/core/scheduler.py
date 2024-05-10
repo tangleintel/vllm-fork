@@ -55,11 +55,11 @@ class SchedulingBudget:
     _num_batched_tokens: int = 0
     _num_curr_seqs: int = 0
 
-    def can_schedule(self, *, num_new_tokens: int, num_new_seqs: int):
+    def can_schedule(self, *, num_new_tokens: int, num_new_seqs: int, headroom: int = 0):
         assert num_new_tokens != 0
         assert num_new_seqs != 0
         return (self.num_batched_tokens + num_new_tokens <= self.token_budget
-                and self.num_curr_seqs + num_new_seqs <= self.max_num_seqs)
+                and self.num_curr_seqs + num_new_seqs <= self.max_num_seqs - headroom)
 
     def remaining_token_budget(self):
         return self.token_budget - self.num_batched_tokens
@@ -305,6 +305,8 @@ class Scheduler:
         self.artificial_preempt_cnt = (ARTIFICIAL_PREEMPTION_MAX_CNT
                                        if self.enable_artificial_preemption
                                        else 0)
+        self._can_fill_headroom = True
+        self.queue_headroom = scheduler_config.queue_headroom
 
     @property
     def lora_enabled(self) -> bool:
@@ -684,9 +686,11 @@ class Scheduler:
                     continue
 
             num_new_seqs = seq_group.get_max_num_running_seqs()
+            headroom = (0 if self._can_fill_headroom else self.queue_headroom)
             if (num_new_tokens == 0
                     or not budget.can_schedule(num_new_tokens=num_new_tokens,
-                                               num_new_seqs=num_new_seqs)):
+                                               num_new_seqs=num_new_seqs,
+                                               headroom = headroom)):
                 break
 
             # Can schedule this request.
@@ -699,6 +703,8 @@ class Scheduler:
                                        token_chunk_size=num_new_tokens))
             budget.add_num_batched_tokens(seq_group.request_id, num_new_tokens)
             budget.add_num_seqs(seq_group.request_id, num_new_seqs)
+            if self.queue_headroom != 0 and self._can_fill_headroom and budget.num_curr_seqs == budget.max_num_seqs:
+                self._can_fill_headroom = False
 
         # Queue requests that couldn't be scheduled.
         waiting_queue.extendleft(leftover_waiting_sequences)
@@ -1001,6 +1007,10 @@ class Scheduler:
     def free_finished_seq_groups(self) -> None:
         self.running = deque(seq_group for seq_group in self.running
                              if not seq_group.is_finished())
+
+        num_seqs = sum([len(seq_group.seqs_dict) for seq_group in self.running])
+        if self.queue_headroom != 0 and not self._can_fill_headroom and (num_seqs + self.queue_headroom <= self.scheduler_config.max_num_seqs):
+            self._can_fill_headroom = True
 
     def _allocate_and_set_running(self, seq_group: SequenceGroup) -> None:
         self.block_manager.allocate(seq_group)
