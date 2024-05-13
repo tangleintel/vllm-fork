@@ -173,7 +173,10 @@ class HabanaModelRunner:
         # The shape of the cached block table will be
         # (max batch size to capture, max context len to capture / block size).
         self.graph_block_tables: torch.Tensor  # Set after initial profiling.
-
+        self.graph_mask = None
+        if mask_str := os.environ.get('VLLM_HPUGRAPH_CAPTURE_MASK', None):
+            mask_shape = (len(_BATCH_SIZES_TO_CAPTURE), len(_MAX_SEQ_LENS_TO_CAPTURE))
+            self.graph_mask = _graph_mask_decode(mask_str, mask_shape)
 
     def load_model(self) -> None:
         with HabanaMemoryProfiler() as m:
@@ -498,6 +501,13 @@ class HabanaModelRunner:
             and batch_size <= _BATCH_SIZES_TO_CAPTURE[-1]
             and max_seq_len <= _MAX_SEQ_LENS_TO_CAPTURE[-1]
             and max_seq_len <= self.max_seq_len_to_capture)
+        if self.graph_mask is not None:
+            graph_batch_size = _get_graph_batch_size(batch_size)
+            graph_batch_size_idx = _BATCH_SIZES_TO_CAPTURE.index(graph_batch_size)
+            graph_max_seq_len  = _get_graph_max_seq_len(max_seq_len)
+            graph_max_seq_len_idx = _MAX_SEQ_LENS_TO_CAPTURE.index(graph_max_seq_len)
+            use_captured_graph = self.graph_mask[graph_batch_size_idx, graph_max_seq_len_idx] != 0
+            
         if use_captured_graph:
             graph_batch_size = _get_graph_batch_size(batch_size)
             assert graph_batch_size >= batch_size
@@ -934,26 +944,34 @@ class HabanaModelRunner:
                 # Skip capture of "out-of-bound" batch sizes and context lengths
                 if batch_size > self.scheduler_config.max_num_seqs:
                     logger.debug(f"[{idx}/{total_combinations}] Skipping capture for batch {batch_size}, max_seq_len {max_seq_len}, block_count {block_count}. Reason: Batch out of bound.")
-                    df[max_seq_len][batch_size] = 'batch OoB'
+                    df[max_seq_len][batch_size] = 'B'
                     continue 
                 if max_seq_len > self.max_seq_len_to_capture:
                     logger.debug(f"[{idx}/{total_combinations}] Skipping capture for batch {batch_size}, max_seq_len {max_seq_len}, block_count {block_count}. Reason: Nax context length out of bound.")
-                    df[max_seq_len][batch_size] = 'ctx OoB'
+                    df[max_seq_len][batch_size] = 'C'
                     continue
                 block_count = math.ceil(max_seq_len / self.block_size)
                 captured_block_counts = [math.ceil(cl / self.block_size) for (n, cl) in valid_combinations if n == batch_size]
                 if block_count in captured_block_counts:
                     logger.debug(f"[{idx}/{total_combinations}] Skipping capture for batch {batch_size}, max_seq_len {max_seq_len}, block_count {block_count}. Reason: Block size already captured.")
-                    df[max_seq_len][batch_size] = 'redundant'
+                    df[max_seq_len][batch_size] = 'R'
                     continue
+                if self.graph_mask is not None:
+                    graph_batch_size_idx = _BATCH_SIZES_TO_CAPTURE.index(batch_size)
+                    graph_max_seq_len_idx = _MAX_SEQ_LENS_TO_CAPTURE.index(max_seq_len)
+                    if self.graph_mask[graph_batch_size_idx, graph_max_seq_len_idx] == 0:
+                        df[max_seq_len][batch_size] = 'G'
+                        continue
                 logger.debug(f"[{idx}/{total_combinations}] Will capture for batch {batch_size}, max_seq_len {max_seq_len}, block_count {block_count}. Constraints met.")
-                df[max_seq_len][batch_size] = 'VALID'
+                df[max_seq_len][batch_size] = 'V'
                 valid_combinations.append((batch_size, max_seq_len))
 
             total_valid_hpugraphs = len(valid_combinations)
             logger.info(f"Starting capture {total_valid_hpugraphs} valid HPUGraphs. Skipping capture of {total_combinations-total_valid_hpugraphs}/{total_combinations} graphs due to batch/context constraints.")
-            logger.debug(f"Capture summary (row: batch_size; col: max_seq_len):")
+            logger.debug(f"Capture summary (row: batch_size; col: max_seq_len; B=batch OoB, C=ctx OoB R=redundant, G=graph mask, V=valid):")
             logger.debug(tabulate.tabulate(df, tablefmt='mixed_outline', headers='keys', showindex="always"))
+            encoded_mask = _graph_mask_encode((df == 'V').to_numpy())
+            logger.debug(f"Graph mask is: {encoded_mask}")
 
             graph_runner_name = self.graph_runner_class.__name__
             graph_mem_usage_df = pd.DataFrame(index=list(reversed(sorted({b for b,c in valid_combinations}))), columns=list(reversed(sorted({c for b,c in valid_combinations}))))
@@ -1295,3 +1313,18 @@ def _get_graph_max_seq_len(max_seq_len: int) -> int:
     else:
         return ((max_seq_len + _MAX_SEQ_LEN_ALIGNMENT - 1) //
                 _MAX_SEQ_LEN_ALIGNMENT * _MAX_SEQ_LEN_ALIGNMENT)
+
+
+def _graph_mask_encode(mask):
+    mask_str = np.packbits(mask.flatten().astype(bool)).tobytes().hex().rstrip('0')
+    if len(mask_str) % 2 == 1:
+        mask_str += '0'
+    return mask_str
+
+def _graph_mask_decode(mask_str, shape):
+    mask = np.zeros(np.prod(shape))
+    if len(mask_str) % 2 == 1:
+        mask_str += '0'
+    decoded_mask = np.unpackbits(np.frombuffer(bytes.fromhex(mask_str), dtype=np.uint8))[:np.prod(shape)]
+    mask[:len(decoded_mask)] = decoded_mask
+    return mask.reshape(shape) 
