@@ -415,9 +415,6 @@ ext_modules = []
 if _is_cuda():
     ext_modules.append(CMakeExtension(name="vllm._moe_C"))
 
-    if _install_punica():
-        ext_modules.append(CMakeExtension(name="vllm._punica_C"))
-
 if not (_is_neuron() or _is_hpu()):
     ext_modules.append(CMakeExtension(name="vllm._C"))
 
