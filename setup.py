@@ -203,13 +203,7 @@ class cmake_build_ext(build_ext):
 
 
 def _is_hpu() -> bool:
-    is_hpu_available = True
-    try:
-        subprocess.run(["hl-smi"], capture_output=True, check=True)
-    except (FileNotFoundError, PermissionError, subprocess.CalledProcessError):
-        if not os.path.exists('/dev/accel/accel0') and not os.path.exists('/dev/accel/accel_controlD0'):
-            is_hpu_available = False
-    return is_hpu_available
+    return True
 
 
 def _is_cuda() -> bool:
