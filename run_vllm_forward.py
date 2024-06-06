@@ -3,9 +3,6 @@
 ###############################################################################
 
 import argparse
-import os
-import glob
-import shutil
 import torch
 from vllm import LLM, SamplingParams
 from vllm.sequence import SequenceData, SequenceGroupMetadata, ExecuteModelRequest
@@ -26,12 +23,14 @@ def setup_profiler():
         with_stack=True)
     return profiler
 
-def profiler_files_organise():
-    """Chnages new profiling file to specified path"""    
-    profiler_files = glob.glob('./*.json.gz')
-    latest_file = max(profiler_files, key=os.path.getctime)
-    os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
-    shutil.move(latest_file, args.output_path)
+def kill_process():
+    """Kills python3 main process manually"""
+    print("Killing process manually")
+    import psutil
+    for proc in psutil.process_iter():
+        if proc.name() == "python3":
+            proc.kill()
+    
 
 def round_up(n, k):
     return ((n + k - 1) // k) * k
@@ -61,24 +60,26 @@ def run_forward(llm, is_prompt, block_size, batch_size, seq_len):
             block_tables=block_tables,
         )
         seqs.append(seq)
-    blocks_to_swap_in = []
-    blocks_to_swap_out = []
-    blocks_to_copy = []
 
     model_request = ExecuteModelRequest(seq_group_metadata_list=seqs)
     
     llm.llm_engine.model_executor.execute_model(model_request)
 
+    print("Forward completed")
+
 def run_vllm():
     """vLLM setup and run"""
     llm = LLM(model=args.model, enforce_eager=args.eager, dtype=model_dtype, block_size=args.block_size, tensor_parallel_size=args.num_cards)
-    # profiler = setup_profiler()
-    # profiler.start()
+    profiler = setup_profiler()
+    profiler.start()
+    print("Starting steps")
     for _ in range(args.steps):
         run_forward(llm, is_prompt, args.block_size, args.batch_size, args.seq_len)
-    #     profiler.step()
-    # profiler.stop()
-    # profiler_files_organise()
+        profiler.step()
+    profiler.stop()
+    print("Finished running llm")
+    if args.num_cards > 1:
+        kill_process()
 
 parser = argparse.ArgumentParser("vLLM arguments parser")
 
@@ -91,7 +92,6 @@ parser.add_argument("--block-size", help="Block size", type=int)
 parser.add_argument("--batch-size", help="Batch size", type=int)
 parser.add_argument("--seq-len", help="Sequence length", type=int)
 parser.add_argument("--steps", help="Number of steps", type=int)
-parser.add_argument("--output-path", help="Path to save profiling config", type=str)
 args = parser.parse_args()
 
 print(args)
