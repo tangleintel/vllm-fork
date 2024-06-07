@@ -7,12 +7,12 @@ import torch
 from vllm import LLM, SamplingParams
 from vllm.sequence import SequenceData, SequenceGroupMetadata, ExecuteModelRequest
 
-def setup_profiler():
+def setup_profiler(steps):
     activities = [torch.profiler.ProfilerActivity.CPU]
     activities.extend([torch.profiler.ProfilerActivity.HPU])
     wait = 0
     active = 1
-    warmup = args.steps - active
+    warmup = steps - active
 
     schedule = torch.profiler.schedule(wait=wait, warmup=warmup, active=active, repeat=1)
     profiler = torch.profiler.profile(
@@ -67,10 +67,10 @@ def run_forward(llm, is_prompt, block_size, batch_size, seq_len):
 
     print("Forward completed")
 
-def run_vllm():
+def run_vllm(model_dtype, is_prompt, args):
     """vLLM setup and run"""
     llm = LLM(model=args.model, enforce_eager=True, dtype=model_dtype, block_size=args.block_size, tensor_parallel_size=args.num_cards)
-    profiler = setup_profiler()
+    profiler = setup_profiler(args.steps)
     profiler.start()
     print("Starting steps")
     for _ in range(args.steps):
@@ -100,4 +100,4 @@ if args.data_type == "bf16":
 
 is_prompt = args.phase == "prompt"
 
-run_vllm()
+run_vllm(model_dtype, is_prompt, args)
