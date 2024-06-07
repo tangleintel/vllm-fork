@@ -101,9 +101,6 @@ else:
     print("Invalid data type, using bf16")
     model_dtype = torch.bfloat16
 
-if args.phase == "prompt":
-    is_prompt = True
-else:
-    is_prompt = False
+is_prompt = args.phase == "prompt"
 
 run_vllm()
