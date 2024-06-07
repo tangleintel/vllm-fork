@@ -85,20 +85,17 @@ parser = argparse.ArgumentParser("vLLM arguments parser")
 
 parser.add_argument("--model", help="Path to the model that will be used", type=str)
 parser.add_argument("--num-cards", help="Number of cards that will be used by model", type=int)
-parser.add_argument("--phase", help="Phase", type=str)
-parser.add_argument("--data-type", help="Type of data that will be used", type=str)
+parser.add_argument("--phase", help="Phase", type=str, choices=["prompt", "decode"])
+parser.add_argument("--data-type", help="Type of data that will be used", type=str, default="bf16", choices=["bf16"])
 parser.add_argument("--block-size", help="Block size", type=int)
 parser.add_argument("--batch-size", help="Batch size", type=int)
 parser.add_argument("--seq-len", help="Sequence length", type=int)
-parser.add_argument("--steps", help="Number of steps", type=int)
+parser.add_argument("--steps", help="Number of steps", type=int, default=3)
 args = parser.parse_args()
 
 print(args)
 
 if args.data_type == "bf16":
-    model_dtype = torch.bfloat16
-else:
-    print("Invalid data type, using bf16")
     model_dtype = torch.bfloat16
 
 is_prompt = args.phase == "prompt"
