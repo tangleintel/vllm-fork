@@ -7,7 +7,6 @@
 MODEL=${MODEL:-llama-70b} # llama-7b, llama-70b or custom path
 NUM_CARDS=${NUM_CARDS:-8}
 PHASE=${PHASE:-decode} # prompt, decode
-EAGER=${EAGER:-1} # 1 for eager
 DATA_TYPE=${DATA_TYPE:-bf16} # bf16
 BLOCK_SIZE=${BLOCK_SIZE:-128} # 128
 BATCH_SIZE=${BATCH_SIZE:-256} # 256
@@ -32,7 +31,6 @@ python3 run_vllm_forward.py \
 --model ${MODEL_PATH} \
 --num-cards ${NUM_CARDS} \
 --phase ${PHASE} \
---eager ${EAGER} \
 --data-type ${DATA_TYPE} \
 --block-size ${BLOCK_SIZE} \
 --batch-size ${BATCH_SIZE} \

@@ -69,7 +69,7 @@ def run_forward(llm, is_prompt, block_size, batch_size, seq_len):
 
 def run_vllm():
     """vLLM setup and run"""
-    llm = LLM(model=args.model, enforce_eager=args.eager, dtype=model_dtype, block_size=args.block_size, tensor_parallel_size=args.num_cards)
+    llm = LLM(model=args.model, enforce_eager=True, dtype=model_dtype, block_size=args.block_size, tensor_parallel_size=args.num_cards)
     profiler = setup_profiler()
     profiler.start()
     print("Starting steps")
@@ -86,7 +86,6 @@ parser = argparse.ArgumentParser("vLLM arguments parser")
 parser.add_argument("--model", help="Path to the model that will be used", type=str)
 parser.add_argument("--num-cards", help="Number of cards that will be used by model", type=int)
 parser.add_argument("--phase", help="Phase", type=str)
-parser.add_argument("--eager", help="Run in eager mode", type=bool)
 parser.add_argument("--data-type", help="Type of data that will be used", type=str)
 parser.add_argument("--block-size", help="Block size", type=int)
 parser.add_argument("--batch-size", help="Batch size", type=int)
