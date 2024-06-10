@@ -4,8 +4,12 @@
 
 import argparse
 import torch
+import os
+import glob
+import shutil
 from vllm import LLM, SamplingParams
 from vllm.sequence import SequenceData, SequenceGroupMetadata, ExecuteModelRequest
+from multiprocessing import Process
 
 def setup_profiler(steps):
     activities = [torch.profiler.ProfilerActivity.CPU]
@@ -23,14 +27,12 @@ def setup_profiler(steps):
         with_stack=True)
     return profiler
 
-def kill_process():
-    """Kills python3 main process manually"""
-    print("Killing process manually")
-    import psutil
-    for proc in psutil.process_iter():
-        if proc.name() == "python3":
-            proc.kill()
-    
+def profiler_files_organise(output_file):
+    """Changes new profiling file to specified path"""    
+    profiler_files = glob.glob('./*.json.gz')
+    latest_file = max(profiler_files, key=os.path.getctime)
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    shutil.move(latest_file, output_file)
 
 def round_up(n, k):
     return ((n + k - 1) // k) * k
@@ -69,7 +71,7 @@ def run_forward(llm, is_prompt, block_size, batch_size, seq_len):
 
 def run_vllm(model_dtype, is_prompt, args):
     """vLLM setup and run"""
-    llm = LLM(model=args.model, enforce_eager=True, dtype=model_dtype, block_size=args.block_size, tensor_parallel_size=args.num_cards)
+    llm = LLM(model=args.model_path, enforce_eager=True, dtype=model_dtype, block_size=args.block_size, tensor_parallel_size=args.num_cards)
     profiler = setup_profiler(args.steps)
     profiler.start()
     print("Starting steps")
@@ -78,18 +80,17 @@ def run_vllm(model_dtype, is_prompt, args):
         profiler.step()
     profiler.stop()
     print("Finished running llm")
-    if args.num_cards > 1:
-        kill_process()
 
 parser = argparse.ArgumentParser("vLLM arguments parser")
 
-parser.add_argument("--model", help="Path to the model that will be used", type=str)
-parser.add_argument("--num-cards", help="Number of cards that will be used by model", type=int)
-parser.add_argument("--phase", help="Phase", type=str, choices=["prompt", "decode"])
+parser.add_argument("--model-path", help="Path to the model that will be used", type=str, default="/mnt/weka/data/pytorch/llama2/Llama-2-7b-chat-hf/")
+parser.add_argument("--num-cards", help="Number of cards that will be used by model", type=int, default=1)
+parser.add_argument("--phase", help="Phase", type=str, choices=["prompt", "decode"], default="decode")
 parser.add_argument("--data-type", help="Type of data that will be used", type=str, default="bf16", choices=["bf16"])
-parser.add_argument("--block-size", help="Block size", type=int)
-parser.add_argument("--batch-size", help="Batch size", type=int)
-parser.add_argument("--seq-len", help="Sequence length", type=int)
+parser.add_argument("--output-path", help="Path where profiler file will be stored", type=str, default="./llama_7b_prof.json.gz")
+parser.add_argument("--block-size", help="Block size", type=int, default=128)
+parser.add_argument("--batch-size", help="Batch size", type=int, default=32)
+parser.add_argument("--seq-len", help="Sequence length", type=int, default=1024)
 parser.add_argument("--steps", help="Number of steps", type=int, default=3)
 args = parser.parse_args()
 
@@ -100,4 +101,13 @@ if args.data_type == "bf16":
 
 is_prompt = args.phase == "prompt"
 
-run_vllm(model_dtype, is_prompt, args)
+p = Process(target=run_vllm, args=(model_dtype, is_prompt, args))
+p.start()
+p.join()
+if p.is_alive():
+    p.terminate()
+p.close()
+
+profiler_files_organise(args.output_path)
+
+print("Done")
