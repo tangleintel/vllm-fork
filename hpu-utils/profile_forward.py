@@ -87,7 +87,7 @@ parser.add_argument("--model-path", help="Path to the model that will be used", 
 parser.add_argument("--num-cards", help="Number of cards that will be used by model", type=int, default=1)
 parser.add_argument("--phase", help="Phase", type=str, choices=["prompt", "decode"], default="decode")
 parser.add_argument("--data-type", help="Type of data that will be used", type=str, default="bf16", choices=["bf16"])
-parser.add_argument("--output-path", help="Path where profiler file will be stored", type=str, default="./llama_7b_prof.json.gz")
+parser.add_argument("--output-path", help="Path where profiler file will be stored", type=str, default="./output.json.gz")
 parser.add_argument("--block-size", help="Block size", type=int, default=128)
 parser.add_argument("--batch-size", help="Batch size", type=int, default=32)
 parser.add_argument("--seq-len", help="Sequence length", type=int, default=1024)
