@@ -11,6 +11,8 @@ from vllm import LLM, SamplingParams
 from vllm.sequence import SequenceData, SequenceGroupMetadata, ExecuteModelRequest
 from multiprocessing import Process
 
+os.environ['VLLM_SKIP_WARMUP']='true'
+
 def setup_profiler(steps):
     activities = [torch.profiler.ProfilerActivity.CPU]
     activities.extend([torch.profiler.ProfilerActivity.HPU])
@@ -81,9 +83,9 @@ def run_vllm(model_dtype, is_prompt, args):
     profiler.stop()
     print("Finished running llm")
 
-parser = argparse.ArgumentParser("vLLM arguments parser")
+parser = argparse.ArgumentParser("vLLM arguments parser", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-parser.add_argument("--model-path", help="Path to the model that will be used", type=str, default="/mnt/weka/data/pytorch/llama2/Llama-2-7b-chat-hf/")
+parser.add_argument("--model-path", help="Path to the model that will be used", type=str, required=True)
 parser.add_argument("--num-cards", help="Number of cards that will be used by model", type=int, default=1)
 parser.add_argument("--phase", help="Phase", type=str, choices=["prompt", "decode"], default="decode")
 parser.add_argument("--data-type", help="Type of data that will be used", type=str, default="bf16", choices=["bf16"])
