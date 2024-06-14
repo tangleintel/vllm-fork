@@ -896,8 +896,9 @@ class HabanaModelRunner:
                 'seq_len': real_max_seq_len,
                 'throughput': throughput,
                 'throughput_effective': throughput_effective,
-                'cache_utilization': '...',
+                f'{"prompt" if is_prompt else "decode"}_batch_utilization': batch_utilization,
                 'batch_utilization': batch_utilization
+                
             }
             self.profiler.record_counter(event_start, counters)
 
