@@ -7,11 +7,11 @@ import torch
 import os
 import glob
 import shutil
+
+os.environ['VLLM_SKIP_WARMUP']='true'
 from vllm import LLM, SamplingParams
 from vllm.sequence import SequenceData, SequenceGroupMetadata, ExecuteModelRequest
 from multiprocessing import Process
-
-os.environ['VLLM_SKIP_WARMUP']='true'
 
 def setup_profiler(steps):
     activities = [torch.profiler.ProfilerActivity.CPU]
