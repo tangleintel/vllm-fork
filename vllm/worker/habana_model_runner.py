@@ -883,11 +883,21 @@ class HabanaModelRunner:
             duration = event_end - event_start
             throughput = batch_size_padded / (duration / 1e6)
             throughput_effective = real_batch_size / (duration / 1e6)
+            real_seq_lens = [len(seq_data.prompt_token_ids) + len(seq_data.output_token_ids) for seq_group_metadata in seq_group_metadata_list for seq_data in seq_group_metadata.seq_data.values()]
+            real_max_seq_len = max(real_seq_lens)
+            real_num_tokens = sum(real_seq_lens)
+            padded_num_tokens = batch_size_padded * seq_len
+            batch_utilization = real_num_tokens / padded_num_tokens
+            
             counters = {
-                'batch_size': batch_size_padded,
-                'batch_size_effective': real_batch_size,
+                'bucket_batch_size': batch_size_padded,
+                'batch_size': real_batch_size,
+                'bucket_seq_len': seq_len,
+                'seq_len': real_max_seq_len,
                 'throughput': throughput,
-                'throughput_effective': throughput_effective
+                'throughput_effective': throughput_effective,
+                'cache_utilization': '...',
+                'batch_utilization': batch_utilization
             }
             self.profiler.record_counter(event_start, counters)
 
