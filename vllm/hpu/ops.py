@@ -65,12 +65,14 @@ def paged_attention_v1(query, key_cache, value_cache, head_mapping, scale, block
     values = fetch_from_cache(value_cache, block_tables, (0, 2, 1, 3))
     if PA_SPLIT_VALUE:
         attn_weights = attn_weights.split(block_size, dim=-1)
+        torch.hpu.synchronize()
     else:
         values = [torch.cat(values, dim=-2)]
         attn_weights = [attn_weights]
     if query_heads != kv_heads:
         values = [v.unflatten(1, (kv_heads, 1)) for v in values]
     attn_weights = [torch.matmul(a, v) for a, v in zip(attn_weights, values)]
+    torch.hpu.synchronize()
     if query_heads != kv_heads:
         attn_weights = [a.flatten(1, 2) for a in attn_weights]
     attn_weights = sum(attn_weights)
