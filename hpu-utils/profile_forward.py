@@ -36,6 +36,14 @@ def profiler_files_organise(output_file):
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
     shutil.move(latest_file, output_file)
 
+def kill_process(pid):
+    """Kills python3 main process manually"""
+    print("Killing process manually")
+    import psutil
+    for proc in psutil.process_iter():
+        if proc.pid == pid:
+            proc.kill()
+
 def round_up(n, k):
     return ((n + k - 1) // k) * k
 
@@ -103,13 +111,12 @@ if args.data_type == "bf16":
 
 is_prompt = args.phase == "prompt"
 
-p = Process(target=run_vllm, args=(model_dtype, is_prompt, args))
-p.start()
-p.join()
-if p.is_alive():
-    p.terminate()
-p.close()
+pid = os.getpid()
+
+run_vllm(model_dtype, is_prompt, args)
 
 profiler_files_organise(args.output_path)
 
 print("Done")
+
+kill_process(pid)
