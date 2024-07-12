@@ -48,6 +48,7 @@ def sample_requests(
         prompt_len = len(prompt_token_ids)
         output_len = len(completion_token_ids
                          ) if fixed_output_len is None else fixed_output_len
+
         if prompt_len < 4 or output_len < 4:
             # Prune too short sequences.
             continue
@@ -56,6 +57,8 @@ def sample_requests(
             continue
         filtered_dataset.append((prompt, prompt_len, output_len))
 
+    print(f"input range: {min([x[1] for x in filtered_dataset])}, {max([x[1] for x in filtered_dataset])}")
+    print(f"output range: {min([x[2] for x in filtered_dataset])}, {max([x[2] for x in filtered_dataset])}")
     return filtered_dataset
 
 
@@ -100,6 +103,11 @@ def run_vllm(
         download_dir=download_dir,
         enable_chunked_prefill=enable_chunked_prefill,
         max_num_batched_tokens=max_num_batched_tokens,
+        block_size=128,
+        max_num_seqs=128,
+		num_lookahead_slots=1,
+		use_v2_block_manager=True,
+		enable_delayed_sampling=True,
     )
 
     # Add the requests to the engine.
@@ -109,10 +117,11 @@ def run_vllm(
         prompts.append(prompt)
         sampling_params.append(
             SamplingParams(
-                n=n,
-                temperature=0.0 if use_beam_search else 1.0,
-                top_p=1.0,
-                use_beam_search=use_beam_search,
+                # n=n,
+                # temperature=0.0 if use_beam_search else 1.0,
+                # top_p=1.0,
+                # use_beam_search=use_beam_search,
+                temperature=0.0,
                 ignore_eos=True,
                 max_tokens=output_len,
             ))
@@ -239,8 +248,12 @@ def main(args: argparse.Namespace):
         raise ValueError(f"Unknown backend: {args.backend}")
     total_num_tokens = sum(prompt_len + output_len
                            for _, prompt_len, output_len in requests)
-    print(f"Throughput: {len(requests) / elapsed_time:.2f} requests/s, "
-          f"{total_num_tokens / elapsed_time:.2f} tokens/s")
+    gen_num_tokens = sum(output_len
+                           for _, _, output_len in requests)
+    print("prompt_len: ", [prompt_len for _, prompt_len, output_len in requests])
+    print("output_len: ", [output_len for _, prompt_len, output_len in requests])
+    print(f"Throughput: {len(requests) / elapsed_time:.2f} requests/s \n"
+          f"TPS(w/ prompts, {total_num_tokens}): {total_num_tokens / elapsed_time:.2f} tokens/s \n" f"TPS(w/o prompts, {gen_num_tokens}): {gen_num_tokens / elapsed_time:.2f} tokens/s")
 
 
 if __name__ == "__main__":
