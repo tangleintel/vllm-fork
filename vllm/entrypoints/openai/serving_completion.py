@@ -263,6 +263,7 @@ class OpenAIServingCompletion(OpenAIServing):
                             CompletionResponseStreamChoice(
                                 index=i,
                                 text=delta_text,
+                                token_ids=delta_token_ids,
                                 logprobs=logprobs,
                                 finish_reason=finish_reason,
                                 stop_reason=stop_reason,
@@ -341,7 +342,7 @@ class OpenAIServingCompletion(OpenAIServing):
             completion_tokens=num_generated_tokens,
             total_tokens=num_prompt_tokens + num_generated_tokens,
         )
-
+        print(choices)
         return CompletionResponse(
             id=request_id,
             created=created_time,
