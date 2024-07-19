@@ -23,7 +23,7 @@ class EngineArgs:
     model: str
     served_model_name: Optional[Union[List[str]]] = None
     tokenizer: Optional[str] = None
-    skip_tokenizer_init: bool = True
+    skip_tokenizer_init: bool = False
     tokenizer_mode: str = 'auto'
     trust_remote_code: bool = False
     download_dir: Optional[str] = None
