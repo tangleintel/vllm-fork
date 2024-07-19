@@ -122,12 +122,14 @@ def setup_profiler():
     return method(schedule)
 
 
-# Read bucketing configuration from env variables
-# phase is either 'prompt' or 'decode'
-# dim is either 'bs' or 'block'
-# param is either 'min', 'step' or 'max'
-# example env variable: VLLM_DECODE_BS_BUCKET_STEP=128
 def read_bucket_settings(phase: str, dim: str, **defaults: Dict):
+    """Read bucketing configuration from env variables.
+
+    phase is either 'prompt' or 'decode'
+    dim is either 'bs' or 'block'
+    param is either 'min', 'step' or 'max'
+    example env variable: VLLM_DECODE_BS_BUCKET_STEP=128
+    """
     params = ['min', 'step', 'max']
     env_vars = [f'VLLM_{phase}_{dim}_BUCKET_{p}'.upper() for p in params]
     defaults = [defaults[p] for p in params]
@@ -138,7 +140,19 @@ def read_bucket_settings(phase: str, dim: str, **defaults: Dict):
 
 
 def warmup_range(config: Tuple[int, int, int]):
+    """Generate a warmup range.
+
+    Start from bmin and multiply by 2 until you reach bstep.
+    Then, increase the values in the range by the value of bstep until you reach bmax.
+
+    Example:
+    bmin = 2, bstep = 32, bmax = 64
+    => ramp_up = (2, 4, 8, 16)
+    => stable = (32, 64)
+    => return ramp_up + stable => (2, 4, 8, 16, 32, 64)
+    """
     bmin, bstep, bmax = config
+    assert bmin <= bmax, "Min. batch size cannot be greater than max. batch size. If you want to skip warmup, set VLLM_SKIP_WARMUP=true"
     base = itertools.repeat(2)
     ramp_up = itertools.accumulate(base, func=operator.mul, initial=bmin)
     ramp_up = itertools.takewhile(lambda x: x < bstep and x <= bmax, ramp_up)
@@ -163,8 +177,8 @@ def generate_decode_buckets(bs_bucket_config, blocks_bucket_config, max_blocks):
     return list(sorted(buckets, key=lambda b: (b[0] * b[1], b[1], b[0])))
 
 
-def next_pow2(value: int):
-    res = 1
+def next_pow2(value: int, base: int):
+    res = base
     while value > 1:
         value = (value + 1) // 2
         res *= 2
@@ -176,12 +190,10 @@ def round_up(value: int, k: int):
 
 
 def find_bucket(value: int, config: Tuple[int, int, int]):
-    _, bstep, _ = config
-    if value < bstep:
-        result = min(next_pow2(value), bstep)
-    else:
-        result = round_up(value, bstep)
-    return result
+    bmin, bstep, _ = config
+    next_step = round_up(value, bstep)
+    next_pow = next_pow2(value, bmin)
+    return max(bmin, min(next_step, next_pow))
 
 
 def align_workers(value, op):
@@ -198,6 +210,13 @@ def pad_list(l, k, v):
     target_len = round_up(len(l), k)
     padding = target_len - len(l)
     return l + [v] * padding
+
+
+def precompute_indices_and_offsets(block_size, slot_mapping):
+    slot_mapping = slot_mapping.flatten()
+    indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
+    offsets = torch.fmod(slot_mapping, block_size)
+    return indices, offsets
 
 
 class HpuModelAdapter():
@@ -595,10 +614,14 @@ class HabanaModelRunner:
                                        dtype=torch.long,
                                        device=self.device)
 
+        block_indices, block_offsets = precompute_indices_and_offsets(self.block_size, slot_mapping)
+
         attn_metadata = self.attn_backend.make_metadata(
             block_list=None,
             block_mapping=None,
             block_usage=None,
+            block_indices=block_indices,
+            block_offsets=block_offsets,
             attn_bias=None,
             seq_lens_tensor=seq_lens_tensor,
         )
@@ -698,10 +721,14 @@ class HabanaModelRunner:
                                     dtype=torch.long,
                                     device=self.device)
 
+        block_indices, block_offsets = precompute_indices_and_offsets(self.block_size, slot_mapping)
+
         attn_metadata = self.attn_backend.make_metadata(
             block_list=block_list,
             block_mapping=block_mapping,
             block_usage=block_usage,
+            block_indices=block_indices,
+            block_offsets=block_offsets,
             attn_bias=None,
             seq_lens_tensor=None,
         )
@@ -886,10 +913,10 @@ class HabanaModelRunner:
     def trim_attn_metadata(self, metadata: AttentionMetadata) -> object:
         prefill_metadata = subtuple(metadata.prefill_metadata,
                                     "TrimmedPrefillMetadata",
-                                    ['attn_bias', 'seq_lens_tensor'])
+                                    ['attn_bias', 'seq_lens_tensor', 'block_indices', 'block_offsets'])
         decode_metadata = subtuple(metadata.decode_metadata,
                                     "TrimmedDecodeMetadata",
-                                    ['attn_bias', 'block_list', 'block_mapping', 'block_usage'])
+                                    ['attn_bias', 'block_list', 'block_mapping', 'block_usage', 'block_indices', 'block_offsets'])
         return subtuple(metadata,
                         'TrimmedMetadata',
                         ['slot_mapping',
