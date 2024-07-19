@@ -342,7 +342,7 @@ class OpenAIServingCompletion(OpenAIServing):
             completion_tokens=num_generated_tokens,
             total_tokens=num_prompt_tokens + num_generated_tokens,
         )
-        print(choices)
+
         return CompletionResponse(
             id=request_id,
             created=created_time,
