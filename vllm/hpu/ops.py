@@ -41,6 +41,7 @@ def paged_attention_v1(query,
                        block_size,
                        alibi_slopes=None,
                        kv_cache_dtype=None) -> None:
+    flops = 0
     seq_len = block_tables.size(1)
     batch_size, query_heads, _ = query.shape
     _, _, kv_heads, _ = key_cache.shape
@@ -59,7 +60,12 @@ def paged_attention_v1(query,
         keys = [k.unflatten(1, (kv_heads, 1)) for k in keys]
         mask = mask.unsqueeze(2)
 
-    attn_weights = [torch.matmul(query, k) for k in keys]
+    # import pdb;pdb.set_trace()
+    # query - torch.Size([4, 32, 1, 128])            (query.size()[2] x query.size()[3])
+    # keys - list len 16
+    # k - torch.Size([4, 32, 128, 128])              (k.size()[2] x k.size()[3])
+    attn_weights = [torch.matmul(query, k) for k in keys] # matmul
+    # flops += sum([flops_counter(query, k) for k in keys])
     attn_weights = torch.cat(attn_weights, dim=-1)
     if alibi_slopes is not None:
         attn_weights.add_(alibi_slopes[:, :, -attn_weights.size(2):,
@@ -74,11 +80,24 @@ def paged_attention_v1(query,
         attn_weights = [attn_weights]
     if query_heads != kv_heads:
         values = [v.unflatten(1, (kv_heads, 1)) for v in values]
-    attn_weights = [torch.matmul(a, v) for a, v in zip(attn_weights, values)]
+    # import pdb;pdb.set_trace()
+    # attn_weights - touple (torch.Size([4, 32, 1, 128]), torch.Size([4, 32, 1, 128]))
+    # values - list len 16
+    # v - torch.Size([4, 32, 128, 128])
+    attn_weights = [torch.matmul(a, v) for a, v in zip(attn_weights, values)] #matmul
+    # flops += sum([flops_counter(a, v) for a, v in zip(attn_weights, values)])
     if query_heads != kv_heads:
         attn_weights = [a.flatten(1, 2) for a in attn_weights]
     attn_weights = sum(attn_weights)
+    print(f"FLOPSSSSSSSSSSSSSSSSSSSSS: {flops}")
     return attn_weights.squeeze(-2)
+
+
+def flops_counter(m1: torch.Tensor, m2: torch.Tensor):
+    # for [B1, B2, M, K] x [B1, B2, N, K] = [B1, B2, M, N]
+    # NUMBER_OF_FLOPS = B1*B2 * M*N*K*2
+    return m1[0] * m1[1] * m1[2] * m2[2] * m1[3] * 2
+
 
 
 def silu_and_mul_wrapper(x: torch.Tensor) -> torch.Tensor:
@@ -132,6 +151,7 @@ def prompt_attention(
     p: float = 0.0,
     scale: Optional[float] = None,
 ) -> torch.Tensor:
+    flops = 0
     query = query.transpose(1, 2)
     key = key.transpose(1, 2)
     value = value.transpose(1, 2)
@@ -142,12 +162,15 @@ def prompt_attention(
         key = key.unflatten(1, (kv_heads, 1))
         value = value.unflatten(1, (kv_heads, 1))
         attn_bias = attn_bias.unsqueeze(2)
-    attn_weights = torch.matmul(query * scale, key.transpose(-1, -2))
+    attn_weights = torch.matmul(query * scale, key.transpose(-1, -2)) # matmul
+    # flops += sum([flops_counter(query * scale, key.transpose(-1, -2))])
     if attn_bias is not None:
         attn_weights.add_(attn_bias)
     attn_weights = torch.softmax(attn_weights, dim=-1)
-    attn_weights = torch.matmul(attn_weights, value)
+    attn_weights = torch.matmul(attn_weights, value) # matmul
+    # flops += sum([flops_counter(attn_weights, value)])
     if query_heads != kv_heads:
         attn_weights = attn_weights.flatten(1, 2)
     attn_weights = attn_weights.transpose(1, 2)
+    print(f"FLOPSSSSSSSSSSSSSSSSSSSSS: {flops}")
     return attn_weights
