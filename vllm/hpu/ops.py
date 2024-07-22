@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 ###############################################################################
 import os
+import time
 from typing import Optional
 
 import habana_frameworks.torch as htorch
@@ -41,6 +42,7 @@ def paged_attention_v1(query,
                        block_size,
                        alibi_slopes=None,
                        kv_cache_dtype=None) -> None:
+    start_time = time.time()
     flops = 0
     seq_len = block_tables.size(1)
     batch_size, query_heads, _ = query.shape
@@ -59,13 +61,8 @@ def paged_attention_v1(query,
         query = query.unflatten(1, (kv_heads, -1))
         keys = [k.unflatten(1, (kv_heads, 1)) for k in keys]
         mask = mask.unsqueeze(2)
-
-    # import pdb;pdb.set_trace()
-    # query - torch.Size([4, 32, 1, 128])            (query.size()[2] x query.size()[3])
-    # keys - list len 16
-    # k - torch.Size([4, 32, 128, 128])              (k.size()[2] x k.size()[3])
     attn_weights = [torch.matmul(query, k) for k in keys] # matmul
-    # flops += sum([flops_counter(query, k) for k in keys])
+    flops += sum([flops_counter(query.size(), k.size()) for k in keys])
     attn_weights = torch.cat(attn_weights, dim=-1)
     if alibi_slopes is not None:
         attn_weights.add_(alibi_slopes[:, :, -attn_weights.size(2):,
@@ -80,16 +77,13 @@ def paged_attention_v1(query,
         attn_weights = [attn_weights]
     if query_heads != kv_heads:
         values = [v.unflatten(1, (kv_heads, 1)) for v in values]
-    # import pdb;pdb.set_trace()
-    # attn_weights - touple (torch.Size([4, 32, 1, 128]), torch.Size([4, 32, 1, 128]))
-    # values - list len 16
-    # v - torch.Size([4, 32, 128, 128])
     attn_weights = [torch.matmul(a, v) for a, v in zip(attn_weights, values)] #matmul
-    # flops += sum([flops_counter(a, v) for a, v in zip(attn_weights, values)])
+    flops += sum([flops_counter(a.size(), v.size()) for a, v in zip(attn_weights, values)])
     if query_heads != kv_heads:
         attn_weights = [a.flatten(1, 2) for a in attn_weights]
     attn_weights = sum(attn_weights)
-    print(f"FLOPSSSSSSSSSSSSSSSSSSSSS: {flops}")
+    end_time = time.time()
+    print(f"TFLOPS: {flops / 10**12 / (end_time - start_time)}")
     return attn_weights.squeeze(-2)
 
 
@@ -151,6 +145,7 @@ def prompt_attention(
     p: float = 0.0,
     scale: Optional[float] = None,
 ) -> torch.Tensor:
+    start_time = time.time()
     flops = 0
     query = query.transpose(1, 2)
     key = key.transpose(1, 2)
@@ -163,14 +158,15 @@ def prompt_attention(
         value = value.unflatten(1, (kv_heads, 1))
         attn_bias = attn_bias.unsqueeze(2)
     attn_weights = torch.matmul(query * scale, key.transpose(-1, -2)) # matmul
-    # flops += sum([flops_counter(query * scale, key.transpose(-1, -2))])
+    flops += sum([flops_counter((query * scale).size(), key.transpose(-1, -2).size())])
     if attn_bias is not None:
         attn_weights.add_(attn_bias)
     attn_weights = torch.softmax(attn_weights, dim=-1)
     attn_weights = torch.matmul(attn_weights, value) # matmul
-    # flops += sum([flops_counter(attn_weights, value)])
+    flops += sum([flops_counter(attn_weights.size(), value.size())])
     if query_heads != kv_heads:
         attn_weights = attn_weights.flatten(1, 2)
     attn_weights = attn_weights.transpose(1, 2)
-    print(f"FLOPSSSSSSSSSSSSSSSSSSSSS: {flops}")
+    end_time = time.time()
+    print(f"TFLOPS: {flops / 10**12 / (end_time - start_time)}")
     return attn_weights
