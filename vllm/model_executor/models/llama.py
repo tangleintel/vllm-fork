@@ -373,7 +373,7 @@ class LlamaForCausalLM(nn.Module):
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:
         logits = self.logits_processor(self.lm_head.weight, hidden_states,
-                                       sampling_metadata)
+                                       sampling_metadata, None, self.lm_head)
         return logits
 
     def sample(

@@ -40,6 +40,7 @@ class LogitsProcessor(nn.Module):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
         embedding_bias: Optional[torch.Tensor] = None,
+        lm_head: Optional[nn.Module] = None,
     ) -> torch.Tensor:
         if self.logits_as_input:
             logits = hidden_states
@@ -48,9 +49,9 @@ class LogitsProcessor(nn.Module):
                                                  sampling_metadata)
 
             # Get the logits for the next tokens.
-            logits = self._get_logits(hidden_states, embedding, embedding_bias)
+            logits = self._get_logits(hidden_states, embedding, embedding_bias, lm_head)
 
-        # NOTE(kzawora): allgather on HPU will cause logits to be not None, 
+        # NOTE(kzawora): allgather on HPU will cause logits to be not None,
         # and we need to guard against applying logits processors on non-driver worker
         if logits is not None and sampling_metadata.seq_groups is not None:
             logits *= self.scale
@@ -61,9 +62,14 @@ class LogitsProcessor(nn.Module):
         return logits
 
     def _get_logits(self, hidden_states: torch.Tensor, embedding: torch.Tensor,
-                    embedding_bias: Optional[torch.Tensor]) -> torch.Tensor:
+                    embedding_bias: Optional[torch.Tensor],
+                    lm_head: Optional[nn.Module] = None) -> torch.Tensor:
         # Get the logits for the next tokens.
-        logits = torch.matmul(hidden_states, embedding.t())
+        if lm_head is not None:
+            logits = lm_head(hidden_states)
+        else:
+            logits = torch.matmul(hidden_states, embedding.t())
+
         if embedding_bias is not None:
             logits += embedding_bias
         # NOTE(kzawora): HPU PT bridge is missing support for single-rank gather. We'll use all-gather on Gaudi for now.
