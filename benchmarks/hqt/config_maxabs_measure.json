@@ -1,0 +1,10 @@
+{
+    "method": "HOOKS",
+    "mode": "MEASURE",
+    "observer": "maxabs",
+    "scale_method": "unit_scale",
+    "whitelist": {"types": [], "names":  []},
+    "blacklist": {"types": [], "names":  []},
+    "quantize_weight": false,
+    "dump_stats_path": "hqt/llama2-7b-1x-g2/unit_test"
+}

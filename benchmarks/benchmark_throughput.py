@@ -83,6 +83,7 @@ def run_vllm(
     max_num_batched_tokens: int,
     gpu_memory_utilization: float = 0.9,
     download_dir: Optional[str] = None,
+    weights_load_device: Optional[str] = None,
 ) -> float:
     from vllm import LLM, SamplingParams
     llm = LLM(
@@ -103,6 +104,7 @@ def run_vllm(
         download_dir=download_dir,
         enable_chunked_prefill=enable_chunked_prefill,
         max_num_batched_tokens=max_num_batched_tokens,
+        weights_load_device=weights_load_device,
         block_size=128,
         max_num_seqs=128,
 		num_lookahead_slots=1,
@@ -235,7 +237,7 @@ def main(args: argparse.Namespace):
             args.quantization_param_path, args.device,
             args.enable_prefix_caching, args.enable_chunked_prefill,
             args.max_num_batched_tokens, args.gpu_memory_utilization,
-            args.download_dir)
+            args.download_dir, args.weights_load_device)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
         elapsed_time = run_hf(requests, args.model, tokenizer, args.n,
@@ -326,7 +328,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--kv-cache-dtype",
         type=str,
-        choices=["auto", "fp8"],
+        choices=["auto", "fp8", "hf8"],
         default="auto",
         help=
         'Data type for kv cache storage. If "auto", will use model data type. '
@@ -366,6 +368,11 @@ if __name__ == "__main__":
                         default=None,
                         help='directory to download and load the weights, '
                         'default to the default cache dir of huggingface')
+    parser.add_argument("--weights-load-device",
+                        type=str,
+                        default="cpu",
+                        choices=["cuda", "neuron", "hpu", "cpu"],
+                        help='Device on which weights are loaded.')
     args = parser.parse_args()
     if args.tokenizer is None:
         args.tokenizer = args.model
