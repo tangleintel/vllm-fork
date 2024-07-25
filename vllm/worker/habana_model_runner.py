@@ -224,9 +224,11 @@ def precompute_indices_and_offsets(block_size, slot_mapping, is_prompt):
 
 
 class HpuModelAdapter():
-    def __init__(self, model, block_size):
+    def __init__(self, model, block_size, enforce_eager):
         self.model = model
         self.block_size = block_size
+        if not htorch.utils.internal.is_lazy() and not enforce_eager:
+            self.model = torch.compile(self.model, backend='hpu_backend')
 
     def _set_attn_bias(self, metadata, batch_size, seq_len, device, dtype):
         seq_lens_t = metadata.seq_lens_tensor
@@ -423,7 +425,7 @@ class HabanaModelRunner:
                 self.model.sampler.include_gpu_probs_tensor = True
                 self.model.sampler.sample_token_positions_only = True
 
-            self.model = _maybe_wrap_in_hpu_graph(HpuModelAdapter(self.model, self.block_size))
+            self.model = _maybe_wrap_in_hpu_graph(HpuModelAdapter(self.model, self.block_size, enforce_eager=self.enforce_eager))
         self.model_memory_usage = m.consumed_device_memory
         logger.info(f"Loading model weights took in total {m.get_summary_string()}")
 
