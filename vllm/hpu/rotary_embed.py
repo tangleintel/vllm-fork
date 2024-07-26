@@ -5,29 +5,11 @@
 # LICENSE file in the root directory of this source tree.
 ###############################################################################
 
-import habana_frameworks.torch.utils.experimental as htexp
 import torch
 import torch.nn as nn
+from vllm.utils import is_hpu
 
-
-def get_device_type():
-    return htexp._get_device_type()
-
-
-def is_gaudi1():
-    return get_device_type() == htexp.synDeviceType.synDeviceGaudi
-
-
-def is_gaudi2():
-    return get_device_type() == htexp.synDeviceType.synDeviceGaudi2
-
-
-def is_gaudi3():
-    return get_device_type() == htexp.synDeviceType.synDeviceGaudi3
-
-
-# TODO: remove this workaround when FusedRoPE properly works on Gaudi
-if not is_gaudi1() and (is_gaudi2() or is_gaudi3()):
+if is_hpu():
     try:
         from habana_frameworks.torch.hpex.kernels import (
             RotaryPosEmbeddingHelperV1 as FusedRoPE)
