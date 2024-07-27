@@ -1175,8 +1175,9 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
 
 def _maybe_wrap_in_hpu_graph(model):
+    #htorch.utils.internal.is_lazy()
     return htorch.hpu.wrap_in_hpu_graph(HpuModelAdapter(
-        model)) if htorch.utils.internal.is_lazy() else HpuModelAdapter(model)
+        model)) if False else HpuModelAdapter(model)
 
 
 class HabanaProfilerCounterHelper():
@@ -1371,7 +1372,7 @@ class HabanaModelRunner(
             #import pdb; pdb.set_trace()
             #print(f'..... {type(self.model)}')
             #sampling_metadata.selected_token_indices = None
-            hidden_states, logits = self.model.forward(
+            hidden_states, output = self.model.forward(
                 **execute_model_kwargs,
                 selected_token_indices=sampling_metadata.
                 selected_token_indices,
@@ -1393,30 +1394,35 @@ class HabanaModelRunner(
         #    import pdb; pdb.set_trace()
         #    logits = self.model.compute_logits(hidden_states,
         #                                       sampling_metadata)
-        htorch.core.mark_step()
-        t2 = time.time()
+        #htorch.core.mark_step()
+        #t2 = time.time()
         #import pdb; pdb.set_trace()
-        try:
-            kvshape = execute_model_kwargs["kv_caches"][0][0].shape
-        except:
-            kvshape = 'None'
-        print(f'[sarkar HE] in HabanaModelRunner.execute_model calling forward, inpshape {tuple(execute_model_kwargs["input_ids"].shape)} kvcache {kvshape} {t2-t0}')
+        
         # Only perform sampling in the driver worker.
         if not self.is_driver_worker:
             return []
 
         # Sample the next token.
-        with self.profiler.record_event(
-                'internal', ('sample_'
-                             f'{"prompt" if is_prompt else "decode"}_'
-                             f'bs{batch_size}_'
-                             f'seq{seq_len}')):
-            output = self.model.sample(
-                logits=logits,
-                sampling_metadata=sampling_metadata,
-            )
+        #with self.profiler.record_event(
+        #        'internal', ('sample_'
+        #                     f'{"prompt" if is_prompt else "decode"}_'
+        #                     f'bs{batch_size}_'
+        #                     f'seq{seq_len}')):
+        #    output = self.model.sample(
+        #        logits=logits,
+        #        sampling_metadata=sampling_metadata,
+        #    )
+        #import pdb; pdb.set_trace()
         output.outputs = output.outputs[:real_batch_size]
         htorch.core.mark_step()
+
+
+        try:
+            kvshape = execute_model_kwargs["kv_caches"][0][0].shape
+        except:
+            kvshape = 'None'
+        t2 = time.time()
+        print(f'[sarkar HE] in HabanaModelRunner.execute_model calling forward, inpshape {tuple(execute_model_kwargs["input_ids"].shape)} kvcache {kvshape} {t2-t0}')
 
         if self.is_driver_worker and self.profiler.enabled:
             # Stop recording 'execute_model' event

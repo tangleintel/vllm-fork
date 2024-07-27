@@ -111,6 +111,8 @@ class Sampler(nn.Module):
         # Get the logprobs query results.
         prompt_logprobs, sample_logprobs = _get_logprobs(
             logprobs, sampling_metadata, sample_results)
+        #import pdb; pdb.set_trace()
+        print('EXIT SAMPLER NNMODULE')
         return _build_sampler_output(sample_results,
                                      sampling_metadata,
                                      prompt_logprobs,
@@ -287,19 +289,22 @@ def _greedy_sample(
     """
     sample_idx = torch.tensor(0, device=samples.device)
     results: SampleResultType = []
+    #import pdb; pdb.set_trace()
+    print('GREEDY....')
     for seq_group in selected_seq_groups:
         if not seq_group.do_sample:
             results.append(([], []))
             continue
 
-        seq_ids = seq_group.seq_ids
-        num_parent_seqs = len(seq_ids)
-        assert num_parent_seqs == 1, (
-            "Greedy sampling should have only one seq.")
-        parent_ids = list(range(num_parent_seqs))
+        #seq_ids = seq_group.seq_ids
+        #num_parent_seqs = len(seq_ids)
+        #assert num_parent_seqs == 1, (
+        #    "Greedy sampling should have only one seq.")
+        parent_ids = [0]
         next_token_ids = torch.index_select(samples, 0, sample_idx)
         results.append((next_token_ids, parent_ids))
-        sample_idx += num_parent_seqs
+        sample_idx += 1
+    print(results)
     return results
 
 
@@ -455,6 +460,23 @@ def _sample_with_torch(
     include_gpu_probs_tensor: bool,
     modify_greedy_probs: bool,
 ) -> Tuple[SampleResultType, Optional[torch.Tensor]]:
+    #return [(i.unsqueeze(0), [0]) for i in torch.argmax(logprobs, dim=-1)], None
+    if include_gpu_probs_tensor:
+        sampled_token_ids_tensor = torch.empty(logprobs.shape[0],
+                                               1,
+                                               dtype=torch.long,
+                                               device=logprobs.device)
+    else:
+        sampled_token_ids_tensor = None
+    if sampled_token_ids_tensor is not None:
+        # Store sampled tokens in output tensor.
+        sampled_token_ids_tensor[
+            long_sample_indices] = greedy_samples.unsqueeze(-1)
+    return [(k, [0]) for k in torch.split(torch.argmax(logprobs, dim=-1),1)], sampled_token_ids_tensor
+    #(tensor([320], device='hpu:0'), [0])
+
+    #import pdb; pdb.set_trace()
+    #print('..........._sample_with_torch.....')
     categorized_seq_group_ids: Dict[SamplingType,
                                     List[int]] = {t: []
                                                   for t in SamplingType}
@@ -481,6 +503,7 @@ def _sample_with_torch(
     # Counterintiutively, having two loops here is actually faster.
     # The first loop can run without waiting on GPU<->CPU sync.
     for sampling_type in SamplingType:
+        #import pdb; pdb.set_trace()
         sample_indices = categorized_sample_indices[sampling_type][:, 0]
         num_tokens = len(sample_indices)
         if num_tokens == 0:
@@ -490,7 +513,8 @@ def _sample_with_torch(
         seq_groups = [sampling_metadata.seq_groups[i] for i in seq_group_id]
         sample_metadata[sampling_type] = (seq_group_id, seq_groups)
         long_sample_indices = sample_indices.long()
-        if sampling_type == SamplingType.GREEDY:
+        if True:#sampling_type == SamplingType.GREEDY:
+            print('GREEDY')
             greedy_samples = torch.argmax(logprobs[long_sample_indices],
                                           dim=-1)
 
@@ -508,6 +532,7 @@ def _sample_with_torch(
                                              greedy_samples)
 
         elif sampling_type in (SamplingType.RANDOM, SamplingType.RANDOM_SEED):
+            print('RANDOM')
             max_best_of_in_batch = 1
             for seq_group in seq_groups:
                 if seq_group.is_prompt:
@@ -528,6 +553,7 @@ def _sample_with_torch(
                     long_sample_indices] = multinomial_samples[sampling_type]
 
         elif sampling_type == SamplingType.BEAM:
+            print('BEAM')
             beam_search_logprobs = logprobs[sample_indices]
         else:
             raise ValueError(f"Unsupported sampling type: {sampling_type}")
@@ -535,10 +561,12 @@ def _sample_with_torch(
     # GPU<->CPU sync happens in the loop below.
     # This also converts the sample output to Python objects.
     for sampling_type in SamplingType:
+        print('for sampling_type in SamplingType:')
         if sampling_type not in sample_metadata:
             continue
         (seq_group_id, seq_groups) = sample_metadata[sampling_type]
         if sampling_type == SamplingType.GREEDY:
+            print('_greedy_sample call')
             sample_results = _greedy_sample(seq_groups, greedy_samples)
         elif sampling_type in (SamplingType.RANDOM, SamplingType.RANDOM_SEED):
             sample_results = _random_sample(seq_groups,
@@ -552,6 +580,7 @@ def _sample_with_torch(
         sample_results_dict.get(i, ([], []))
         for i in range(len(sampling_metadata.seq_groups))
     ]
+    import pdb; pdb.set_trace()
     return sample_results, sampled_token_ids_tensor
 
 
@@ -642,6 +671,7 @@ def _sample(
     sampling_metadata: SamplingMetadata, sampling_tensors: SamplingTensors,
     include_gpu_probs_tensor: bool, modify_greedy_probs: bool
 ) -> Tuple[SampleResultType, Optional[torch.Tensor]]:
+    print('XXXXXXXXXXX _sample .....')
     """
     Args:
         probs: (num_query_tokens_in_batch, num_vocab)
@@ -745,6 +775,7 @@ def _get_logprobs(
 
         # Update indices and next tokenes for sample logprob.
         if seq_group.do_sample:
+            #import pdb; pdb.set_trace()
             token_ids, parent_seq_ids = sample_result
             # NOTE: We cannot directly use sample_indices because
             # sample_indices only contain parent seq_ids of a previous step.
