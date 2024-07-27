@@ -191,6 +191,7 @@ class RayHabanaExecutor(DistributedGPUExecutor):
         Passing None will cause the driver to stop the model execution
         loop running in each of the remote workers.
         """
+        print('[sarkar] calling self.driver_worker.execute_method')
         return self.driver_worker.execute_method("execute_model",
                                                  execute_model_req)
 
@@ -349,6 +350,7 @@ class RayHabanaExecutorAsync(RayHabanaExecutor, DistributedGPUExecutorAsync):
         results = await asyncio.gather(*tasks)
 
         # Only the last PP stage has the final results.
+        print('[sarkar] RayHabanaExecutorAsync')
         return results[-1]
 
     async def _start_worker_execution_loop(self):

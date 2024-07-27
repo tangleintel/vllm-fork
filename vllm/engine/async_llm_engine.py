@@ -127,6 +127,7 @@ class RequestTracker:
                                *,
                                verbose: bool = False) -> None:
         """Process a request output from the engine."""
+        verbose = True
         request_id = request_output.request_id
 
         self._request_streams[request_id].put(request_output)
@@ -141,6 +142,7 @@ class RequestTracker:
                           *,
                           verbose: bool = False) -> None:
         """Propagate an exception from the engine."""
+        verbose = True
         self._request_streams[request_id].put(exception)
         if verbose:
             logger.info("Finished request %s.", request_id)
@@ -165,6 +167,7 @@ class RequestTracker:
 
     def abort_request(self, request_id: str, *, verbose: bool = False) -> None:
         """Abort a request during next background loop iteration."""
+        verbose = True
         if verbose:
             logger.info("Aborted request %s.", request_id)
 
@@ -533,6 +536,8 @@ class AsyncLLMEngine:
 
         Returns True if there are in-progress requests."""
 
+        print('[sarkar] async llm emgine engine_step')
+
         new_requests, finished_requests = (
             self._request_tracker.get_new_and_finished_requests())
 
@@ -577,6 +582,7 @@ class AsyncLLMEngine:
             self.engine.abort_request(request_ids)
 
     async def run_engine_loop(self):
+        print('[sarkar] async llm engine run_engine_loop')
         if self.engine_use_ray:
             pipeline_parallel_size = 1  # type: ignore
         else:
@@ -668,11 +674,12 @@ class AsyncLLMEngine:
                 if shortened_token_ids is not None:
                     shortened_token_ids = shortened_token_ids[:max_log_len]
 
-            logger.info(
-                "Received request %s: prompt: %r, "
-                "params: %s, prompt_token_ids: %s, "
-                "lora_request: %s.", request_id, shortened_prompt, params,
-                shortened_token_ids, lora_request)
+            #logger.info(
+            #    "Received request %s: prompt: %r, "
+            #    "params: %s, prompt_token_ids: %s, "
+            #    "lora_request: %s.", request_id, shortened_prompt[:10], params,
+            #    shortened_token_ids[:10], lora_request)
+            logger.info(f"Received request {request_id}")
 
         if not self.is_running:
             if self.start_engine_loop:

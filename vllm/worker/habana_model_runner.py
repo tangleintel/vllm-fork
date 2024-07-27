@@ -176,6 +176,7 @@ class HpuModelAdapter():
         return attn_metadata
 
     def forward(self, *args, **kwargs):
+        print('[sarkar HE] in HpuModelAdapter calling forward')
         kwargs = kwargs.copy()
         selected_token_indices = kwargs.pop('selected_token_indices')
         if 'bypass_hpu_graphs' in kwargs:
@@ -186,10 +187,18 @@ class HpuModelAdapter():
                                                       input_ids.size(1),
                                                       input_ids.device,
                                                       torch.bfloat16)
-        hidden_states = self.model(*args, **kwargs)
-        hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
-        hidden_states = hidden_states.index_select(0, selected_token_indices)
-        return hidden_states
+        #import pdb; pdb.set_trace()
+        '''
+        selected_token_indices should be passed in, but passing in sampling_metadata is enuf, because it contains selected_token_indices
+        (but is that always the case?)
+        '''
+        hidden_states, logits = self.model(*args, **kwargs)
+        if  kwargs['sampling_metadata'] is None:
+            hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
+            hidden_states = hidden_states.index_select(0, selected_token_indices)
+        else:
+            hidden_states = None
+        return hidden_states, logits
 
     def compute_logits(self, *args, **kwargs):
         return self.model.compute_logits(*args, **kwargs)
@@ -428,6 +437,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             # FIXME: Running with disable_tensor_cache=True causes
             # RuntimeErrors. This needs to be debugged
             with HabanaMemoryProfiler() as m_wrap:
+                #import pdb; pdb.set_trace()
                 self.model = _maybe_wrap_in_hpu_graph(self.model)
             msg = f"Wrapping in HPU Graph took {m_wrap.get_summary_string()}"
             logger.info(msg)
@@ -480,6 +490,14 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                           min=self.block_size,
                                                           step=self.block_size,
                                                           max=2048)
+        
+        self.prompt_bs_bucket_cf = [1,8,8]
+        self.decode_bs_bucket_cfg = [1,8,8]
+        #self.prompt_seq_bucket_cfg = [16,16,1024]
+        #self.decode_seq_bucket_cfg = [16,16,1024]
+
+
+        
         self.graphed_buckets: Set[Any] = set()
 
         msg = ("Prompt bucket config (min, step, max_warmup) "
@@ -499,6 +517,9 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         logger.info(msg)
         self.decode_buckets = warmup_buckets(self.decode_bs_bucket_cfg,
                                              self.decode_seq_bucket_cfg)
+        #import pdb; pdb.set_trace()
+        #self.decode_buckets = [x for x in self.decode_buckets if x[0] <= 8]
+        #self.prompt_buckets = [x for x in self.prompt_buckets if x[0] <= 8]
         msg = (f"Generated {len(self.decode_buckets)} decode buckets: "
                f"{list(sorted(self.decode_buckets))}")
         logger.info(msg)
@@ -1026,7 +1047,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         kv_caches = [None] * num_layers
         max_batch_size = self.prompt_bs_bucket_cfg[-1]
         max_seq_len = self.prompt_seq_bucket_cfg[-1]
-
+        print(f'[sarkar HMR] Running warmup_scenario max_batch_size={max_batch_size}, max_seq_len={max_seq_len}')
         self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches)
 
     def warmup_scenario(self, batch_size, seq_len, is_prompt,
@@ -1044,7 +1065,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             for i in range(batch_size)
         ]
         torch.hpu.synchronize()
-        for _ in range(times):
+        for idx in range(times):
+            print(f'[sarkar HMR] Running self.prepare_model_input idx={idx}')
             inputs = self.prepare_model_input(seqs)
             self.execute_model(inputs, kv_caches)
             torch.hpu.synchronize()
@@ -1117,6 +1139,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         start_time = time.perf_counter()
         self.warmup_all_buckets(self.prompt_buckets, True, kv_caches)
         self.warmup_all_buckets(self.decode_buckets, False, kv_caches)
+
+        #import pdb; pdb.set_trace()
 
         if not self.enforce_eager:
             mem_margin = 1.0 - float(
@@ -1342,22 +1366,41 @@ class HabanaModelRunner(
         else:
             model_event_name = 'model_executable'
         with self.profiler.record_event('internal', model_event_name):
-            hidden_states = self.model.forward(
+            import time
+            t0 = time.time()
+            #import pdb; pdb.set_trace()
+            #print(f'..... {type(self.model)}')
+            #sampling_metadata.selected_token_indices = None
+            hidden_states, logits = self.model.forward(
                 **execute_model_kwargs,
                 selected_token_indices=sampling_metadata.
                 selected_token_indices,
-                bypass_hpu_graphs=not use_graphs)
+                bypass_hpu_graphs=not use_graphs,
+                sampling_metadata=sampling_metadata)
+            #htorch.core.mark_step(sync=True)
+            #t1 = time.time()
 
+            #import pdb; pdb.set_trace()
+
+        #t3 = time.time()
         # Compute the logits.
-        with self.profiler.record_event(
-                'internal', ('compute_logits_'
-                             f'{"prompt" if is_prompt else "decode"}_bs'
-                             f'{batch_size}_'
-                             f'seq{seq_len}')):
-            sampling_metadata.selected_token_indices = None
-            logits = self.model.compute_logits(hidden_states,
-                                               sampling_metadata)
+        #with self.profiler.record_event(
+        #        'internal', ('compute_logits_'
+        #                     f'{"prompt" if is_prompt else "decode"}_bs'
+        #                     f'{batch_size}_'
+        #                     f'seq{seq_len}')):
+        #    sampling_metadata.selected_token_indices = None
+        #    import pdb; pdb.set_trace()
+        #    logits = self.model.compute_logits(hidden_states,
+        #                                       sampling_metadata)
         htorch.core.mark_step()
+        t2 = time.time()
+        #import pdb; pdb.set_trace()
+        try:
+            kvshape = execute_model_kwargs["kv_caches"][0][0].shape
+        except:
+            kvshape = 'None'
+        print(f'[sarkar HE] in HabanaModelRunner.execute_model calling forward, inpshape {tuple(execute_model_kwargs["input_ids"].shape)} kvcache {kvshape} {t2-t0}')
         # Only perform sampling in the driver worker.
         if not self.is_driver_worker:
             return []

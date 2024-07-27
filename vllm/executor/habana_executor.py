@@ -72,6 +72,7 @@ class HabanaExecutor(ExecutorBase):
         """Determine the number of available KV blocks by invoking the
         underlying worker.
         """
+        print(f'[sarkar HE] Running self.driver_worker.determine_num_available_blocks')
         return self.driver_worker.determine_num_available_blocks()
 
     def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks) -> None:
@@ -80,6 +81,7 @@ class HabanaExecutor(ExecutorBase):
         # NOTE: This is logged in the executor because there can be >1 worker
         # with other executors. We could log in the engine level, but work
         # remains to abstract away the device for non-GPU configurations.
+        print(f'[sarkar HE] Running initialize_cache')
         logger.info("# HPU blocks: %d, # CPU blocks: %d", num_gpu_blocks,
                     num_cpu_blocks)
 
@@ -95,6 +97,7 @@ class HabanaExecutor(ExecutorBase):
         # VLLM_HPU_LOG_STEP_GRAPH_COMPILATION_ALL - will log graph compilations per engine step, always, even if there were none # noqa:E501
         # VLLM_HPU_LOG_STEP_CPU_FALLBACKS         - will log cpu fallbacks per engine step, only when there was any # noqa:E501
         # VLLM_HPU_LOG_STEP_CPU_FALLBACKS_ALL     - will log cpu fallbacks per engine step, always, even if there were none # noqa:E501
+        print(f'[sarkar HE] Running execute_model')
         log_graph_compilation_all = os.environ.get(
             'VLLM_HPU_LOG_STEP_GRAPH_COMPILATION_ALL', '0') != '0'
         log_graph_compilation = os.environ.get(
@@ -146,6 +149,7 @@ class HabanaExecutor(ExecutorBase):
             return output
 
         output = self.driver_worker.execute_model(execute_model_req)
+        logger.warning(str(output))
         return output
 
     def add_lora(self, lora_request: LoRARequest) -> bool:
