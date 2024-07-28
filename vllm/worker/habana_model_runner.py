@@ -410,8 +410,14 @@ class HabanaModelRunner:
             if self.model_config.quantization == 'hqt':
                 logger.info("Preparing model with HQT..")
                 with HabanaMemoryProfiler() as m_hqt:
-                    import habana_quantization_toolkit
-                    habana_quantization_toolkit.prep_model(self.model)
+                    from neural_compressor.torch.quantization import FP8Config, convert, prepare
+
+                    config = FP8Config.from_json_file(os.getenv("QUANT_CONFIG", ""))
+                    if config.measure:
+                        self.model = prepare(self.model, config)
+                    elif config.quantize:
+                        self.model = convert(self.model, config)
+
                     htcore.hpu_initialize(self.model, mark_only_scales_as_const=True)
                 logger.info(f"Preparing model with HQT took {m_hqt.get_summary_string()}")
             else:
@@ -929,8 +935,8 @@ class HabanaModelRunner:
                          'decode_metadata': decode_metadata})
 
     def finish_measurements(self):
-        import habana_quantization_toolkit
-        habana_quantization_toolkit.finish_measurements(self.model.model)
+        from neural_compressor.torch.quantization import finalize_calibration
+        finalize_calibration(self.model.model)
 
     def _check_config(self, batch_size, seq_len, is_prompt, warmup_mode):
         cfg = (batch_size, seq_len, is_prompt)
