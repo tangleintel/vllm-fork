@@ -222,7 +222,6 @@ def main(args: argparse.Namespace):
     else:
         requests = sample_requests(args.dataset, args.num_prompts, tokenizer,
                                    args.output_len)
-
     if args.backend == "vllm":
         elapsed_time = run_vllm(
             requests, args.model, args.tokenizer, args.quantization,

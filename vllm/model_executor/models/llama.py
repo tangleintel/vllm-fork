@@ -388,10 +388,22 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA):
         kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
         intermediate_tensors: Optional[IntermediateTensors] = None,
+        sampling_metadata = None,
     ) -> Union[torch.Tensor, IntermediateTensors]:
         model_output = self.model(input_ids, positions, kv_caches,
                                   attn_metadata, intermediate_tensors)
-        return model_output
+        if sampling_metadata is not None:
+            hidden_states = model_output.view(-1, model_output.shape[-1])
+            hidden_states = hidden_states.index_select(0, sampling_metadata.selected_token_indices)
+            sampling_metadata.selected_token_indices = None
+            x = self.compute_logits(hidden_states, sampling_metadata)
+            y = self.sample(
+                    logits=x,
+                    sampling_metadata=sampling_metadata,
+                )
+            return None, y
+        else:
+            return model_output, None
 
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:

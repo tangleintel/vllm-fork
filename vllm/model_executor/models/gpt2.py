@@ -241,10 +241,22 @@ class GPT2LMHeadModel(nn.Module):
         kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
         intermediate_tensors: Optional[IntermediateTensors] = None,
+        sampling_metadata = None,
     ) -> torch.Tensor:
         hidden_states = self.transformer(input_ids, positions, kv_caches,
                                          attn_metadata, intermediate_tensors)
-        return hidden_states
+        if sampling_metadata is not None:
+            hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
+            hidden_states = hidden_states.index_select(0, sampling_metadata.selected_token_indices)
+            sampling_metadata.selected_token_indices = None
+            x = self.compute_logits(hidden_states, sampling_metadata)
+            y = self.sample(
+                    logits=x,
+                    sampling_metadata=sampling_metadata,
+                )
+            return None, y
+        else:
+            return hidden_states, None
 
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:

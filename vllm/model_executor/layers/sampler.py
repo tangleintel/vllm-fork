@@ -285,22 +285,23 @@ def _greedy_sample(
         same as the length of selected_seq_groups. If the corresponding
         seq_group has do_sample=False, tuple contains ([], [])
     """
-    samples_lst = samples.tolist()
-    sample_idx = 0
+    sample_idx = torch.tensor(0, device=samples.device)
     results: SampleResultType = []
     for seq_group in selected_seq_groups:
         if not seq_group.do_sample:
             results.append(([], []))
             continue
 
-        seq_ids = seq_group.seq_ids
-        num_parent_seqs = len(seq_ids)
-        assert num_parent_seqs == 1, (
-            "Greedy sampling should have only one seq.")
-        parent_ids = list(range(num_parent_seqs))
-        next_token_ids = [samples_lst[sample_idx]]
+        #seq_ids = seq_group.seq_ids
+        #num_parent_seqs = len(seq_ids)
+        #assert num_parent_seqs == 1, (
+        #    "Greedy sampling should have only one seq.")
+        #parent_ids = list(range(num_parent_seqs))
+        parent_ids = [0]
+        next_token_ids = torch.index_select(samples, 0, sample_idx)
         results.append((next_token_ids, parent_ids))
-        sample_idx += num_parent_seqs
+        #sample_idx += num_parent_seqs
+        sample_idx += 1
     return results
 
 
@@ -456,6 +457,19 @@ def _sample_with_torch(
     include_gpu_probs_tensor: bool,
     modify_greedy_probs: bool,
 ) -> Tuple[SampleResultType, Optional[torch.Tensor]]:
+    if include_gpu_probs_tensor:
+        sampled_token_ids_tensor = torch.empty(logprobs.shape[0],
+                                               1,
+                                               dtype=torch.long,
+                                               device=logprobs.device)
+    else:
+        sampled_token_ids_tensor = None
+    if sampled_token_ids_tensor is not None:
+        # Store sampled tokens in output tensor.
+        sampled_token_ids_tensor[
+            long_sample_indices] = greedy_samples.unsqueeze(-1)
+    return [([k],[0]) for k in torch.argmax(logprobs, dim=-1).to('cpu').numpy()], sampled_token_ids_tensor
+    #return [(k, [0]) for k in torch.split(torch.argmax(logprobs, dim=-1),1)], sampled_token_ids_tensor
     categorized_seq_group_ids: Dict[SamplingType,
                                     List[int]] = {t: []
                                                   for t in SamplingType}

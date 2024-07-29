@@ -186,10 +186,11 @@ class HpuModelAdapter():
                                                       input_ids.size(1),
                                                       input_ids.device,
                                                       torch.bfloat16)
-        hidden_states = self.model(*args, **kwargs)
-        hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
-        hidden_states = hidden_states.index_select(0, selected_token_indices)
-        return hidden_states
+        hidden_states, logits = self.model(*args, **kwargs)
+        if  kwargs['sampling_metadata'] is None:
+            hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
+            hidden_states = hidden_states.index_select(0, selected_token_indices)
+        return hidden_states, logits
 
     def compute_logits(self, *args, **kwargs):
         return self.model.compute_logits(*args, **kwargs)
@@ -480,6 +481,9 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                           min=self.block_size,
                                                           step=self.block_size,
                                                           max=2048)
+        
+        #  VLLM_DECODE_BS_BUCKET_MIN=1 VLLM_DECODE_BS_BUCKET_MAX=16 VLLM_DECODE_BS_BUCKET_STEP=8 VLLM_PROMPT_BS_BUCKET_MIN=1 VLLM_PROMPT_BS_BUCKET_MAX=8 VLLM_PROMPT_BS_BUCKET_STEP=4 VLLM_DECODE_SEQ_BUCKET_MIN=256 VLLM_DECODE_SEQ_BUCKET_MAX=512 VLLM_DECODE_SEQ_BUCKET_STEP=256 VLLM_PROMPT_SEQ_BUCKET_MIN=256 VLLM_PROMPT_SEQ_BUCKET_MAX=256 VLLM_PROMPT_SEQ_BUCKET_STEP=512 
+        
         self.graphed_buckets: Set[Any] = set()
 
         msg = ("Prompt bucket config (min, step, max_warmup) "
@@ -1342,36 +1346,43 @@ class HabanaModelRunner(
         else:
             model_event_name = 'model_executable'
         with self.profiler.record_event('internal', model_event_name):
-            hidden_states = self.model.forward(
+            hidden_states, output = self.model.forward(
                 **execute_model_kwargs,
                 selected_token_indices=sampling_metadata.
                 selected_token_indices,
-                bypass_hpu_graphs=not use_graphs)
+                bypass_hpu_graphs=not use_graphs,
+                sampling_metadata=sampling_metadata)
 
-        # Compute the logits.
-        with self.profiler.record_event(
-                'internal', ('compute_logits_'
-                             f'{"prompt" if is_prompt else "decode"}_bs'
-                             f'{batch_size}_'
-                             f'seq{seq_len}')):
-            sampling_metadata.selected_token_indices = None
-            logits = self.model.compute_logits(hidden_states,
-                                               sampling_metadata)
-        htorch.core.mark_step()
+        if output is None:
+            # Compute the logits.
+            with self.profiler.record_event(
+                    'internal', ('compute_logits_'
+                                f'{"prompt" if is_prompt else "decode"}_bs'
+                                f'{batch_size}_'
+                                f'seq{seq_len}')):
+                sampling_metadata.selected_token_indices = None
+                logits = self.model.compute_logits(hidden_states,
+                                                sampling_metadata)
+                htorch.core.mark_step()
+
+
         # Only perform sampling in the driver worker.
         if not self.is_driver_worker:
             return []
 
-        # Sample the next token.
-        with self.profiler.record_event(
-                'internal', ('sample_'
-                             f'{"prompt" if is_prompt else "decode"}_'
-                             f'bs{batch_size}_'
-                             f'seq{seq_len}')):
-            output = self.model.sample(
-                logits=logits,
-                sampling_metadata=sampling_metadata,
-            )
+        if output is None:
+            # Sample the next token.
+            with self.profiler.record_event(
+                    'internal', ('sample_'
+                                f'{"prompt" if is_prompt else "decode"}_'
+                                f'bs{batch_size}_'
+                                f'seq{seq_len}')):
+                output = self.model.sample(
+                    logits=logits,
+                    sampling_metadata=sampling_metadata,
+                )
+
+
         output.outputs = output.outputs[:real_batch_size]
         htorch.core.mark_step()
 
