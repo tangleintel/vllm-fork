@@ -1263,9 +1263,8 @@ class HabanaModelRunner:
         if model_config := getattr(self, "model_config", None):
             if getattr(model_config, "quantization", None) == 'hqt':
                 print('hqt shutdown start')
-                import habana_quantization_toolkit
-                if habana_quantization_toolkit is not None:
-                    habana_quantization_toolkit.finish_measurements(self.model.model)
+                from neural_compressor.torch.quantization import finalize_calibration
+                finalize_calibration(self.model.model)
                 print('hqt shutdown')
 
     def __del__(self):
