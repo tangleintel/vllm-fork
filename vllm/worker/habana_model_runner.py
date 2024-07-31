@@ -21,7 +21,7 @@ from vllm.attention import (AttentionMetadata, AttentionMetadataPerStage,
                             get_attn_backend)
 from vllm.config import (DeviceConfig, LoadConfig, CacheConfig, LoRAConfig, ModelConfig,
                          ParallelConfig, SchedulerConfig, VisionLanguageConfig)
-from vllm.distributed import broadcast_tensor_dict, broadcast
+from vllm.distributed import broadcast_tensor_dict
 from vllm.distributed.parallel_state import get_cpu_world_group
 from vllm.logger import init_logger
 from vllm.lora.layers import LoRAMapping
@@ -415,11 +415,9 @@ class HabanaModelRunner:
                     htcore.hpu_initialize(self.model, mark_only_scales_as_const=True)
                 logger.info(f"Preparing model with HQT took {m_hqt.get_summary_string()}")
             else:
-                logger.info(f"start with model load to hpu is driver{self.is_driver_worker}")
                 self.model = self.model.to("hpu")
                 htcore.mark_step()
             torch.hpu.synchronize()
-            logger.info(f"done with model load to hpu is driver{self.is_driver_worker}")
 
             if self.scheduler_config.enable_delayed_sampling:
                 self.model.sampler.include_gpu_probs_tensor = True
@@ -949,7 +947,6 @@ class HabanaModelRunner:
         kv_caches: List[torch.Tensor],
         warmup_mode=False,
     ) -> Optional[SamplerOutput]:
-        #logger.info(f"libin debug execute_model  start driver {self.is_driver_worker}")
         if self.is_driver_worker:
             event_start = self.profiler.get_timestamp_us()
             is_prompt = seq_group_metadata_list[0].is_prompt
@@ -968,7 +965,6 @@ class HabanaModelRunner:
             lora_requests, lora_mapping, multi_modal_input
             ) = self.prepare_input_tensors(seq_group_metadata_list)
             is_prompt = attn_metadata.prefill_metadata is not None
-        #logger.info(f"libin debug execute_model done with prepare input {self.is_driver_worker}")
         if self.lora_config:
             self.set_active_loras(lora_requests, lora_mapping)
 
@@ -1043,7 +1039,6 @@ class HabanaModelRunner:
         else:
             model_event_name = 'model_executable'
         with self.profiler.record_event('internal', model_event_name):
-            #logger.info(f"libin debug execute_modek model forward done is driver {self.is_driver_worker} { execute_model_kwargs['input_ids'].shape}")
             hidden_states = self.model.forward(**execute_model_kwargs, selected_token_indices=sampling_metadata.selected_token_indices)
         if self.scheduler_config.enable_delayed_sampling:
             if self.is_driver_worker:
@@ -1085,7 +1080,7 @@ class HabanaModelRunner:
             with self.profiler.record_event('internal', f'compute_logits_{"prompt" if is_prompt else "decode"}_bs{batch_size}_seq{seq_len}'):
                 sampling_metadata.selected_token_indices = None
                 logits = self.model.compute_logits(hidden_states, sampling_metadata)
-            if self.is_driver_worker: 
+            if self.is_driver_worker:
                 for idx, seq_group_metadata in enumerate(seq_group_metadata_list):
                     assert len(seq_group_metadata.seq_data) == 1
                     for seq_data in seq_group_metadata.seq_data.values():
@@ -1117,12 +1112,12 @@ class HabanaModelRunner:
             self.profiler.end()
             event_end = self.profiler.get_timestamp_us()
             counters = self.profiler_counter_helper.get_counter_dict(
-                cache_config=self.cache_config, 
-                duration=event_end-event_start, 
-                seq_len=seq_len, 
-                batch_size_padded=batch_size_padded, 
-                real_batch_size=real_batch_size, 
-                seq_group_metadata_list=seq_group_metadata_list, 
+                cache_config=self.cache_config,
+                duration=event_end-event_start,
+                seq_len=seq_len,
+                batch_size_padded=batch_size_padded,
+                real_batch_size=real_batch_size,
+                seq_group_metadata_list=seq_group_metadata_list,
                 is_prompt=is_prompt)
             self.profiler.record_counter(event_start, counters)
 
