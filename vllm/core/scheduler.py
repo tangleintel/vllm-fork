@@ -884,7 +884,6 @@ class Scheduler:
         # Update swapped requests.
         self.swapped = remaining_swapped
         self.swapped.extend(running_scheduled.swapped_out)
-
         return SchedulerOutputs(
             scheduled_seq_groups=(prefills.seq_groups +
                                   running_scheduled.prefill_seq_groups +
@@ -996,6 +995,7 @@ class Scheduler:
                 if scheduler_outputs.num_prefill_groups > 0 else None,
             )
             seq_group_metadata_list.append(seq_group_metadata)
+
         # Now that the batch has been created, we can assume all blocks in the
         # batch will have been computed before the next scheduling invocation.
         # This is because the engine assumes that a failure in model execution
