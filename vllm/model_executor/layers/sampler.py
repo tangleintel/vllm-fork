@@ -89,42 +89,54 @@ class Sampler(nn.Module):
 
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
-        probs = torch.softmax(logits, dim=-1, dtype=torch.float)
+        #probs = torch.softmax(logits, dim=-1, dtype=torch.float)
         # Compute the log probabilities.
         logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float)
 
         # Sample the next tokens.
-        sample_results, maybe_sampled_tokens_tensor = _sample(
-            probs,
-            logprobs,
-            sampling_metadata,
-            sampling_tensors,
-            include_gpu_probs_tensor=self.include_gpu_probs_tensor,
-            modify_greedy_probs=self._should_modify_greedy_probs_inplace,
-            token_positions_only=self.sample_token_positions_only,
-        )
+        #sample_results, maybe_sampled_tokens_tensor = _sample(
+        #    probs,
+        #    logprobs,
+        #    sampling_metadata,
+        #    sampling_tensors,
+        #    include_gpu_probs_tensor=self.include_gpu_probs_tensor,
+        #    modify_greedy_probs=self._should_modify_greedy_probs_inplace,
+        #    token_positions_only=self.sample_token_positions_only,
+        #)
 
-        if self.include_gpu_probs_tensor:
-            assert maybe_sampled_tokens_tensor is not None
-            on_device_tensors = (probs, logprobs, maybe_sampled_tokens_tensor)
-        else:
-            on_device_tensors = None
+        #if self.include_gpu_probs_tensor:
+        #    assert maybe_sampled_tokens_tensor is not None
+        #    on_device_tensors = (probs, logprobs, maybe_sampled_tokens_tensor)
+        #else:
+        #    on_device_tensors = None
+
+        on_device_tensors = None
+        maybe_sampled_tokens_tensor = None
+
+        vals, idx = torch.max(logprobs, dim=1)
+        vals = vals.tolist()
+        idx = idx.tolist()
+        bs = logprobs.shape[0]
+        prompt_logprobs = [None] * bs
+
+        #sample_logprobs = [[{i: Logprob(logprob=v, rank=1, decoded_token=None)}] for v, i in zip(vals, idx)]
+        sample_results = [([i], [0]) for i in idx]
 
         # Check if logprobs are required
-        get_logprobs = False
-        for seq_group in sampling_metadata.seq_groups:
-            sampling_type = seq_group.sampling_params.sampling_type
-            if sampling_type is not SamplingType.GREEDY:
-                get_logprobs = True
-                break
+        #get_logprobs = False
+        #for seq_group in sampling_metadata.seq_groups:
+        #    sampling_type = seq_group.sampling_params.sampling_type
+        #    if sampling_type is not SamplingType.GREEDY:
+        #        get_logprobs = True
+        #        break
 
-        if get_logprobs:
-            # Get the logprobs query results.
-            prompt_logprobs, sample_logprobs = _get_logprobs(
-                logprobs, sampling_metadata, sample_results)
-        else:
-            prompt_logprobs = []
-            sample_logprobs = []
+        #if get_logprobs:
+        #    # Get the logprobs query results.
+        #    prompt_logprobs, sample_logprobs = _get_logprobs(
+        #        logprobs, sampling_metadata, sample_results)
+        #else:
+        prompt_logprobs = []
+        sample_logprobs = []
 
         return _build_sampler_output(sample_results,
                                      sampling_metadata,
