@@ -426,6 +426,7 @@ class LLMEngine:
             prompt=prompt,
             prompt_token_ids=prompt_token_ids,
             lora_request=lora_request)
+
         # Create the sequences.
         block_size = self.cache_config.block_size
         seq_id = next(self.seq_counter)
@@ -438,6 +439,7 @@ class LLMEngine:
                            "not initialized")
         seq = Sequence(seq_id, prompt, prompt_token_ids, block_size,
                        eos_token_id, lora_request)
+
         # Defensive copy of SamplingParams, which are used by the sampler,
         # this doesn't deep-copy LogitsProcessor objects
         sampling_params = sampling_params.clone()
@@ -447,9 +449,11 @@ class LLMEngine:
             sampling_params.all_stop_token_ids.add(seq.eos_token_id)
         sampling_params.update_from_generation_config(
             self.generation_config_fields)
+
         # Create the sequence group.
         seq_group = SequenceGroup(request_id, [seq], sampling_params,
                                   arrival_time, lora_request, multi_modal_data)
+
         # Add the sequence group to the scheduler.
         self.scheduler.add_seq_group(seq_group)
 
@@ -486,7 +490,7 @@ class LLMEngine:
 
     def has_unfinished_requests(self) -> bool:
         """Returns True if there are unfinished requests."""
-        return  = self.scheduler.has_unfinished_seqs()
+        return self.scheduler.has_unfinished_seqs()
 
     def _process_model_outputs(
         self,

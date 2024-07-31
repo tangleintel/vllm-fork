@@ -253,7 +253,6 @@ class LLM:
                     outputs.append(output)
                     if use_tqdm:
                         pbar.update(1)
-            count=count+1
         if use_tqdm:
             pbar.close()
         # Sort the outputs by request ID.
@@ -261,3 +260,4 @@ class LLM:
         # its previous requests.
         outputs = sorted(outputs, key=lambda x: int(x.request_id))
         return outputs
+
