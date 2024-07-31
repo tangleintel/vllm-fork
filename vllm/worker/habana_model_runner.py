@@ -1040,72 +1040,55 @@ class HabanaModelRunner:
             model_event_name = 'model_executable'
         with self.profiler.record_event('internal', model_event_name):
             hidden_states = self.model.forward(**execute_model_kwargs, selected_token_indices=sampling_metadata.selected_token_indices)
-        if self.scheduler_config.enable_delayed_sampling:
-            if self.is_driver_worker:
-                if is_prompt:
-                    # For prompts compose empty output
-                    from vllm.sequence import (Logprob, SamplerOutput, SequenceGroupOutput, SequenceOutput)
-                    sampler_output = []
-                    for seq_group in sampling_metadata.seq_groups:
-                        seq_ids = seq_group.seq_ids
-                        next_token_id, parent_id = -1, 0
-                        seq_outputs = []
-                        seq_outputs.append(
-                            SequenceOutput(seq_ids[parent_id], next_token_id, {-1: Logprob(0.0)}))
-                        sampler_output.append(
-                            SequenceGroupOutput(seq_outputs, None))
+        if self.scheduler_config.enable_delayed_sampling and self.is_driver_worker:
+            if not is_prompt:
+                htorch.core.mark_step()
+                # Only after dispatching next model.forward() read and update the previous token ids to return
+                sampled_token_ids = output.sampled_token_ids.tolist()
+                for seq_group_output in output.outputs[:real_batch_size]:
+                    for sample in seq_group_output.samples:
+                        sample.output_token = sampled_token_ids[sample.output_token][0]
+                output = output
 
-                    sampled_token_probs, logprobs_tensor, sampled_token_ids = (None, None, None)
-                    output = SamplerOutput(
-                        outputs=sampler_output,
-                        sampled_token_probs=sampled_token_probs,
-                        sampled_token_ids=sampled_token_ids,
-                        logprobs=logprobs_tensor,
-                    )
-                    output.outputs = output.outputs[:real_batch_size]
-                    htorch.core.mark_step()
-                else:
-                    htorch.core.mark_step()
-                    # Only after dispatching next model.forward() read and update the previous token ids to return
-                    sampled_token_ids = output.sampled_token_ids.tolist()
-                    for seq_group_output in output.outputs[:real_batch_size]:
-                        for sample in seq_group_output.samples:
-                            sample.output_token = sampled_token_ids[sample.output_token][0]
-                    output = output
+                output.outputs = output.outputs[:real_batch_size]
+                htorch.core.mark_step()  
+            else:
+                # For prompts compose empty output
+                from vllm.sequence import (Logprob, SamplerOutput, SequenceGroupOutput, SequenceOutput)
+                sampler_output = []
+                for seq_group in sampling_metadata.seq_groups:
+                    seq_ids = seq_group.seq_ids
+                    next_token_id, parent_id = -1, 0
+                    seq_outputs = []
+                    seq_outputs.append(
+                        SequenceOutput(seq_ids[parent_id], next_token_id, {-1: Logprob(0.0)}))
+                    sampler_output.append(
+                        SequenceGroupOutput(seq_outputs, None))
 
-                    output.outputs = output.outputs[:real_batch_size]
-                    htorch.core.mark_step()
-
-            # Compute the logits.
-            with self.profiler.record_event('internal', f'compute_logits_{"prompt" if is_prompt else "decode"}_bs{batch_size}_seq{seq_len}'):
-                sampling_metadata.selected_token_indices = None
-                logits = self.model.compute_logits(hidden_states, sampling_metadata)
-            if self.is_driver_worker:
-                for idx, seq_group_metadata in enumerate(seq_group_metadata_list):
-                    assert len(seq_group_metadata.seq_data) == 1
-                    for seq_data in seq_group_metadata.seq_data.values():
-                        seq_data.prev_logits = logits
-                        seq_data.prev_logits_idx = idx
-            htorch.core.mark_step()
-            if not self.is_driver_worker:
-                # Only perform sampling in the driver worker.
-                return None
-        else: #if not self.scheduler_config.enable_delayed_sampling:
-            # Compute logits
-            with self.profiler.record_event('internal', f'compute_logits_{"prompt" if is_prompt else "decode"}_bs{batch_size}_seq{seq_len}'):
-                sampling_metadata.selected_token_indices = None
-                logits = self.model.compute_logits(hidden_states, sampling_metadata)
-            # Sample the next token only for driver worker
-            if self.is_driver_worker:
-                with self.profiler.record_event('internal', f'sample_{"prompt" if is_prompt else "decode"}_bs{batch_size}_seq{seq_len}'):
-                    output = self.model.sample(
-                        logits=logits,
-                        sampling_metadata=sampling_metadata,
-                    )
+                sampled_token_probs, logprobs_tensor, sampled_token_ids = (None, None, None)
+                output = SamplerOutput(
+                    outputs=sampler_output,
+                    sampled_token_probs=sampled_token_probs,
+                    sampled_token_ids=sampled_token_ids,
+                    logprobs=logprobs_tensor,
+                )
                 output.outputs = output.outputs[:real_batch_size]
                 htorch.core.mark_step()
-            else:
-                return None
+
+        # Compute the logits.
+        with self.profiler.record_event('internal', f'compute_logits_{"prompt" if is_prompt else "decode"}_bs{batch_size}_seq{seq_len}'):
+            sampling_metadata.selected_token_indices = None
+            logits = self.model.compute_logits(hidden_states, sampling_metadata)
+        if self.is_driver_worker:
+            for idx, seq_group_metadata in enumerate(seq_group_metadata_list):
+                assert len(seq_group_metadata.seq_data) == 1
+                for seq_data in seq_group_metadata.seq_data.values():
+                    seq_data.prev_logits = logits
+                    seq_data.prev_logits_idx = idx
+        htorch.core.mark_step()
+        if not self.is_driver_worker:
+            # Only perform sampling in the driver worker.
+            return None
 
         if self.profiler.enabled and self.is_driver_worker:
             # Stop recording 'execute_model' event
