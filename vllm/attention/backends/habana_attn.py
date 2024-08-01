@@ -110,7 +110,7 @@ class HabanaAttentionMetadata(AttentionMetadata, HabanaPagedAttentionMetadata):
         self.attn_bias: Optional[torch.Tensor] = None
 
 
-class HabanaAttentionImpl(AttentionImpl):
+class HabanaAttentionImpl(AttentionImpl, torch.nn.Module):
     """
     If the input tensors contain prompt tokens, the layout is as follows:
     |<--------------- num_prefill_tokens ----------------->|
@@ -139,6 +139,7 @@ class HabanaAttentionImpl(AttentionImpl):
         blocksparse_params: Optional[Dict[str, Any]] = None,
         max_seq_len: int = 4096,
     ) -> None:
+        super(AttentionImpl, self).__init__()
         self.kv_cache_dtype = kv_cache_dtype
         self.num_heads = num_heads
         self.head_size = head_size
@@ -239,6 +240,9 @@ class HabanaAttentionImpl(AttentionImpl):
                     attn_bias=attn_bias,
                     p=0.0,
                     scale=self.scale,
+                    qk_matmul_op=self.qk_matmul,
+                    softmax_op=self.softmax,
+                    av_matmul_op=self.av_matmul,
                 )
                 output = out.reshape(batch_size, seq_len, hidden_size)
             else:

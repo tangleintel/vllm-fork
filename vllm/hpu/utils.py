@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 ###############################################################################
 
+import torch
 from functools import wraps
 
 import habana_frameworks.torch as htorch
