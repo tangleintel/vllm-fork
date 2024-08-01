@@ -1,9 +1,11 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
-import torch.nn.functional as F
+from torch.nn import Module
 from torch.nn.parameter import Parameter
+import torch.nn.functional as F
 
+from vllm import _custom_ops as ops
 from vllm.logger import init_logger
 from vllm.model_executor.layers.linear import LinearBase, LinearMethodBase
 from vllm.model_executor.layers.quantization.base_config import (
@@ -57,15 +59,13 @@ class INCConfig(QuantizationConfig):
     def get_scaled_act_names(self) -> List[str]:
         return []
 
-    @classmethod
-    def get_min_capability(cls) -> int:
+    def get_min_capability(self) -> int:
         # The AWQ kernel only supports Turing or newer GPUs.
         return 75
 
     @staticmethod
     def get_config_filenames() -> List[str]:
         return []
-
 
 class INCLinearMethod(LinearMethodBase):
     """Linear method for FP8.
@@ -83,9 +83,7 @@ class INCLinearMethod(LinearMethodBase):
         quant_config: The quantization config.
     """
 
-    def __init__(self,
-                 quant_config: INCConfig,
-                 separate_bias_add: bool = False):
+    def __init__(self, quant_config: INCConfig, separate_bias_add: bool = False):
         self.separate_bias_add = separate_bias_add
         self.quant_config = quant_config
 

@@ -474,13 +474,13 @@ class CacheConfig:
     def _verify_cache_dtype(self) -> None:
         if self.cache_dtype == "auto":
             pass
-        elif self.cache_dtype in ("fp8", "fp8_e4m3", "fp8_e5m2", "fp8_inc"):
+        elif self.cache_dtype in ("fp8", "fp8_e4m3", "fp8_e5m2", "hf8"):
             logger.info(
                 "Using fp8 data type to store kv cache. It reduces the GPU "
                 "memory footprint and boosts the performance. "
                 "Meanwhile, it may cause accuracy drop without a proper "
                 "scaling factor. "
-                "Intel Gaudi (HPU) supports fp8 (using fp8_inc).")
+                "FP8_E4M3 is also supported on hpu (hf8).")
         else:
             raise ValueError(f"Unknown kv cache dtype: {self.cache_dtype}")
 

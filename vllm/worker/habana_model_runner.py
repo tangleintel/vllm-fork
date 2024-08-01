@@ -436,30 +436,23 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                    f"took {m_getmodel.get_summary_string()}")
             logger.info(msg)
 
+            import habana_frameworks.torch.core as htcore
             if self.model_config.quantization == 'inc':
                 logger.info("Preparing model with INC..")
                 with HabanaMemoryProfiler() as m_inc:
-                    from neural_compressor.torch.quantization import (
-                        FP8Config, convert, prepare)
-                    config = FP8Config.from_json_file(
-                        os.getenv("QUANT_CONFIG", ""))
+                    from neural_compressor.torch.quantization import FP8Config, convert, prepare
+                    config = FP8Config.from_json_file(os.getenv("QUANT_CONFIG", ""))
                     if config.measure:
                         self.model = prepare(self.model, config)
                     elif config.quantize:
                         self.model = convert(self.model, config)
-                    htcore.hpu_initialize(self.model,
-                                          mark_only_scales_as_const=True)
-                logger.info("Preparing model with INC took %s",
-                            m_inc.get_summary_string())
+                    htcore.hpu_initialize(self.model, mark_only_scales_as_const=True)
+                logger.info(f"Preparing model with INC took {m_inc.get_summary_string()}")
             else:
                 self.model = self.model.to("hpu")
                 htcore.mark_step()
             torch.hpu.synchronize()
 
-            
-            if self.scheduler_config.enable_delayed_sampling:
-                self.model.sampler.include_gpu_probs_tensor = True
-                self.model.sampler.sample_token_positions_only = True
             # FIXME: Running with disable_tensor_cache=True causes
             # RuntimeErrors. This needs to be debugged
             with HabanaMemoryProfiler() as m_wrap:
@@ -1446,21 +1439,6 @@ class HabanaModelRunner(
         from neural_compressor.torch.quantization import finalize_calibration
         finalize_calibration(self.model.model)
 
-    def _check_config(self, batch_size, seq_len, is_prompt, warmup_mode):
-        cfg = (batch_size, seq_len, is_prompt)
-        seen = cfg in self.seen_configs
-        self.seen_configs.add(cfg)
-        phase = 'prompt' if is_prompt else 'decode'
-        if not seen and not warmup_mode:
-            logger.warning(f'Configuration: ({phase}, {batch_size}, {seq_len}) was not warmed-up!')
-        '''
-        if not warmup_mode:
-            if cfg not in self.graphed_buckets:
-                logger.warning(f'Configuration not in graph bucket : ({phase}, {batch_size}, {seq_len})')
-            else:
-                logger.warning(f'Configuration is in graph bucket : ({phase}, {batch_size}, {seq_len})')
-        '''
-            
     @torch.inference_mode()
     def execute_model(
         self,
@@ -1660,13 +1638,12 @@ class HabanaModelRunner(
 
     def shutdown_inc(self):
         print('inc shutdown')
-        if (model_config := getattr(self, "model_config", None)) and \
-                         getattr(model_config, "quantization", None) == 'inc':
-            print('inc shutdown start')
-            from neural_compressor.torch.quantization import (
-                finalize_calibration)
-            finalize_calibration(self.model.model)
-            print('inc shutdown')
+        if model_config := getattr(self, "model_config", None):
+            if getattr(model_config, "quantization", None) == 'inc':
+                print('inc shutdown start')
+                from neural_compressor.torch.quantization import finalize_calibration
+                finalize_calibration(self.model.model)
+                print('inc shutdown')
 
     def __del__(self):
         self.shutdown_inc()
