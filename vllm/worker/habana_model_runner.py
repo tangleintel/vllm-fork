@@ -429,6 +429,23 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                    f"took {m_getmodel.get_summary_string()}")
             logger.info(msg)
 
+            import habana_frameworks.torch.core as htcore
+            if self.model_config.quantization == 'inc':
+                logger.info("Preparing model with INC..")
+                with HabanaMemoryProfiler() as m_inc:
+                    from neural_compressor.torch.quantization import FP8Config, convert, prepare
+                    config = FP8Config.from_json_file(os.getenv("QUANT_CONFIG", ""))
+                    if config.measure:
+                        self.model = prepare(self.model, config)
+                    elif config.quantize:
+                        self.model = convert(self.model, config)
+                    htcore.hpu_initialize(self.model, mark_only_scales_as_const=True)
+                logger.info(f"Preparing model with INC took {m_inc.get_summary_string()}")
+            else:
+                self.model = self.model.to("hpu")
+                htcore.mark_step()
+            torch.hpu.synchronize()
+
             # FIXME: Running with disable_tensor_cache=True causes
             # RuntimeErrors. This needs to be debugged
             with HabanaMemoryProfiler() as m_wrap:
@@ -1362,6 +1379,10 @@ class HabanaModelRunner(
                                    is_prompt=is_prompt,
                                    virtual_engine=virtual_engine)
 
+    def finish_measurements(self):
+        from neural_compressor.torch.quantization import finalize_calibration
+        finalize_calibration(self.model.model)
+
     @torch.inference_mode()
     def execute_model(
         self,
@@ -1461,3 +1482,15 @@ class HabanaModelRunner(
                 is_prompt=is_prompt)
             self.profiler.record_counter(self.event_start, counters)
         return [output]
+
+    def shutdown_inc(self):
+        print('inc shutdown')
+        if model_config := getattr(self, "model_config", None):
+            if getattr(model_config, "quantization", None) == 'inc':
+                print('inc shutdown start')
+                from neural_compressor.torch.quantization import finalize_calibration
+                finalize_calibration(self.model.model)
+                print('inc shutdown')
+
+    def __del__(self):
+        self.shutdown_inc()
