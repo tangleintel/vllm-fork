@@ -42,7 +42,9 @@ def paged_attention_v1(query,
                        kv_cache_dtype=None,
                        qk_matmul_op=torch.matmul,
                        softmax_op=torch.softmax,
-                       av_matmul_op=torch.matmul) -> None:
+                       av_matmul_op=torch.matmul,
+                       k_cache_cls=None,
+                       v_cache_cls=None) -> None:
     seq_len = block_tables.size(1)
     batch_size, query_heads, _ = query.shape
     _, _, kv_heads, _ = key_cache.shape
@@ -55,7 +57,8 @@ def paged_attention_v1(query,
                                  batch_size, 1, 1, -1))
     query.mul_(scale)
     query = query.unsqueeze(-2)
-    keys = fetch_from_cache(key_cache, block_tables, (0, 2, 3, 1))
+    fetch_keys = fetch_from_cache if k_cache_cls is None else k_cache_cls.fetch_from_cache
+    keys = fetch_keys(key_cache, block_tables, (0, 2, 3, 1))
     if query_heads != kv_heads:
         query = query.unflatten(1, (kv_heads, -1))
         keys = [k.unflatten(1, (kv_heads, 1)) for k in keys]
@@ -68,7 +71,8 @@ def paged_attention_v1(query,
                                        -attn_weights.size(3):])
     attn_weights = softmax_op(attn_weights.masked_fill(mask, min_inf), dim=-1)
 
-    values = fetch_from_cache(value_cache, block_tables, (0, 2, 1, 3))
+    fetch_values = fetch_from_cache if v_cache_cls is None else k_cache_cls.fetch_from_cache
+    values = fetch_values(value_cache, block_tables, (0, 2, 1, 3))
     if PA_SPLIT_VALUE:
         attn_weights = attn_weights.split(block_size, dim=-1)
     else:
