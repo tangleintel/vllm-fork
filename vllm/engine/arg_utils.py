@@ -103,8 +103,7 @@ class EngineArgs:
 
     scheduler_delay_factor: float = 0.0
     enable_chunked_prefill: Optional[bool] = None
-    enable_delayed_sampling: Optional[bool] = False
-    
+
     guided_decoding_backend: str = 'outlines'
     # Speculative decoding configuration.
     speculative_model: Optional[str] = None
@@ -528,14 +527,6 @@ class EngineArgs:
             const="True",
             help='If set, the prefill requests can be chunked based on the '
             'max_num_batched_tokens.')
-        
-        parser.add_argument(
-            '--enable-delayed-sampling',
-            action='store_true',
-            help='If set, the sampling will be delayed by 1 step. First '
-            'model request execution (prefill) will return an invalid token '
-            'id that will be discarded. Actual sampling of valid token ids '
-            'starts from second model execution.')
 
         parser.add_argument(
             '--speculative-model',
@@ -833,7 +824,6 @@ class EngineArgs:
             enable_chunked_prefill=self.enable_chunked_prefill,
             embedding_mode=model_config.embedding_mode,
             preemption_mode=self.preemption_mode,
-            enable_delayed_sampling=self.enable_delayed_sampling,
         )
         lora_config = LoRAConfig(
             max_lora_rank=self.max_lora_rank,
@@ -852,8 +842,7 @@ class EngineArgs:
             self.model_loader_extra_config[
                 "qlora_adapter_name_or_path"] = self.qlora_adapter_name_or_path
 
-        device = device_config.device if self.weights_load_device is None else \
-                 self.weights_load_device
+        device = device_config.device if self.weights_load_device is None else self.weights_load_device
         load_config = LoadConfig(
             load_format=self.load_format,
             download_dir=self.download_dir,
