@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 ###############################################################################
 
+import torch
 from functools import wraps
 
 import habana_frameworks.torch as htorch
@@ -22,3 +23,18 @@ def with_mark_steps(fn):
         return result
 
     return wrapped
+
+class Matmul(torch.nn.Module):
+    def __init__(self):
+        super(Matmul, self).__init__()
+
+    def forward(self, x, y):
+        return torch.matmul(x, y)
+
+
+class Softmax(torch.nn.Module):
+      def __init__(self):
+        super().__init__()
+
+      def forward(self, x, dim = None, inv_head = None):
+        return torch.softmax(x, dim)

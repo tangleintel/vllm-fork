@@ -40,7 +40,10 @@ def paged_attention_v1(query,
                        context_lens,
                        block_size,
                        alibi_slopes=None,
-                       kv_cache_dtype=None) -> None:
+                       kv_cache_dtype=None,
+                       qk_matmul_op=torch.matmul,
+                       softmax_op=torch.softmax,
+                       av_matmul_op=torch.matmul) -> None:
     seq_len = block_tables.size(1)
     batch_size, query_heads, _ = query.shape
     _, _, kv_heads, _ = key_cache.shape
@@ -59,12 +62,12 @@ def paged_attention_v1(query,
         keys = [k.unflatten(1, (kv_heads, 1)) for k in keys]
         mask = mask.unsqueeze(2)
 
-    attn_weights = [torch.matmul(query, k) for k in keys]
+    attn_weights = [qk_matmul_op(query, k) for k in keys]
     attn_weights = torch.cat(attn_weights, dim=-1)
     if alibi_slopes is not None:
         attn_weights.add_(alibi_slopes[:, :, -attn_weights.size(2):,
                                        -attn_weights.size(3):])
-    attn_weights = (attn_weights.masked_fill(mask, min_inf).softmax(dim=-1))
+    attn_weights = softmax_op(attn_weights.masked_fill(mask, min_inf), dim=-1)
 
     values = fetch_from_cache(value_cache, block_tables, (0, 2, 1, 3))
     if PA_SPLIT_VALUE:
@@ -74,7 +77,7 @@ def paged_attention_v1(query,
         attn_weights = [attn_weights]
     if query_heads != kv_heads:
         values = [v.unflatten(1, (kv_heads, 1)) for v in values]
-    attn_weights = [torch.matmul(a, v) for a, v in zip(attn_weights, values)]
+    attn_weights = [av_matmul_op(a, v) for a, v in zip(attn_weights, values)]
     if query_heads != kv_heads:
         attn_weights = [a.flatten(1, 2) for a in attn_weights]
     attn_weights = sum(attn_weights)
@@ -131,6 +134,9 @@ def prompt_attention(
     attn_bias: Optional[torch.Tensor] = None,
     p: float = 0.0,
     scale: Optional[float] = None,
+    qk_matmul_op = torch.matmul,
+    softmax_op = torch.softmax,
+    av_matmul_op = torch.matmul,
 ) -> torch.Tensor:
     query = query.transpose(1, 2)
     key = key.transpose(1, 2)
@@ -142,11 +148,11 @@ def prompt_attention(
         key = key.unflatten(1, (kv_heads, 1))
         value = value.unflatten(1, (kv_heads, 1))
         attn_bias = attn_bias.unsqueeze(2)
-    attn_weights = torch.matmul(query * scale, key.transpose(-1, -2))
+    attn_weights = qk_matmul_op(query * scale, key.transpose(-1, -2))
     if attn_bias is not None:
         attn_weights.add_(attn_bias)
-    attn_weights = torch.softmax(attn_weights, dim=-1)
-    attn_weights = torch.matmul(attn_weights, value)
+    attn_weights = softmax_op(attn_weights, dim=-1)
+    attn_weights = av_matmul_op(attn_weights, value)
     if query_heads != kv_heads:
         attn_weights = attn_weights.flatten(1, 2)
     attn_weights = attn_weights.transpose(1, 2)
