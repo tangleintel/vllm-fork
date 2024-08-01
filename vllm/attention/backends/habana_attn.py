@@ -12,6 +12,7 @@ from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
                                               AttentionMetadata, AttentionType)
 from vllm.attention.ops.habana_paged_attn import (HabanaPagedAttention,
                                                   HabanaPagedAttentionMetadata)
+from vllm.hpu.utils import Matmul, Softmax
 from vllm.logger import init_logger
 
 logger = init_logger(__name__)
@@ -108,7 +109,7 @@ class HabanaAttentionMetadata(AttentionMetadata, HabanaPagedAttentionMetadata):
         self.attn_bias: Optional[torch.Tensor] = None
 
 
-class HabanaAttentionImpl(AttentionImpl):
+class HabanaAttentionImpl(AttentionImpl, torch.nn.Module):
     """
     If the input tensors contain prompt tokens, the layout is as follows:
     |<--------------- num_prefill_tokens ----------------->|
@@ -137,10 +138,14 @@ class HabanaAttentionImpl(AttentionImpl):
         blocksparse_params: Optional[Dict[str, Any]] = None,
         max_seq_len: int = 4096,
     ) -> None:
+        super(AttentionImpl, self).__init__()
         self.kv_cache_dtype = kv_cache_dtype
         self.num_heads = num_heads
         self.head_size = head_size
         self.scale = float(scale)
+        self.qk_matmul = Matmul()
+        self.softmax = Softmax()
+        self.av_matmul = Matmul()
         self.num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
         self.sliding_window = sliding_window
         self.position_bias = None
@@ -232,6 +237,9 @@ class HabanaAttentionImpl(AttentionImpl):
                     attn_bias=attn_bias,
                     p=0.0,
                     scale=self.scale,
+                    qk_matmul_op=self.qk_matmul,
+                    softmax_op=self.softmax,
+                    av_matmul_op=self.av_matmul,
                 )
                 output = out.reshape(batch_size, seq_len, hidden_size)
             else:
@@ -255,7 +263,7 @@ class HabanaAttentionImpl(AttentionImpl):
                 query, key_cache, value_cache, attn_metadata.block_tables,
                 attn_metadata.seq_lens_tensor, self.kv_cache_dtype,
                 self.num_kv_heads, self.scale, self.position_bias, k_scale,
-                v_scale)
+                v_scale, self.qk_matmul, self.softmax, self.av_matmul)
         # Reshape the output tensor.
         return output.view(batch_size, seq_len, hidden_size)
 
