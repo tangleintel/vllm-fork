@@ -30,7 +30,6 @@ def fetch_from_cache(cache, blocks, permutations):
     ]
 
 
-@hpu_utils.with_mark_steps
 def paged_attention_v1(query,
                        key_cache,
                        value_cache,
@@ -126,7 +125,6 @@ def static_fused_moe(hidden_states, w1, w2, score, topk):
     return final_hidden_states.view(-1, D)
 
 
-@hpu_utils.with_mark_steps
 def prompt_attention(
     query: torch.Tensor,
     key: torch.Tensor,
