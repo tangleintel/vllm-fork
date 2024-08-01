@@ -182,8 +182,8 @@ class HpuModelAdapter():
     def forward(self, *args, **kwargs):
         kwargs = kwargs.copy()
         selected_token_indices = kwargs.pop('selected_token_indices')
-        if 'bypass_hpu_graphs' in kwargs:
-            kwargs.pop('bypass_hpu_graphs')  # required for PT eager
+        if 'warmup_mode' in kwargs:
+            kwargs.pop('warmup_mode')
         input_ids = kwargs['input_ids']
         kwargs['attn_metadata'] = self._set_attn_bias(kwargs['attn_metadata'],
                                                       input_ids.size(0),
@@ -1051,7 +1051,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         torch.hpu.synchronize()
         for _ in range(times):
             inputs = self.prepare_model_input(seqs)
-            self.execute_model(inputs, kv_caches)
+            self.execute_model(inputs, kv_caches, warmup_mode=True)
             torch.hpu.synchronize()
         self.profiler.end()
         gc.collect()
@@ -1369,6 +1369,7 @@ class HabanaModelRunner(
         kv_caches: List[torch.Tensor],
         intermediate_tensors: Optional[IntermediateTensors] = None,
         num_steps: int = 1,
+        warmup_mode=False,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
         if num_steps > 1:
             raise ValueError(
@@ -1402,6 +1403,8 @@ class HabanaModelRunner(
         }
         if multi_modal_input is not None:
             execute_model_kwargs.update(multi_modal_input)
+        if htorch.utils.internal.is_lazy():
+            execute_model_kwargs.update({"bypass_hpu_graphs":not use_graphs, "warmup_mode":warmup_mode})
 
         htorch.core.mark_step()
         if self.is_driver_worker:
@@ -1416,8 +1419,7 @@ class HabanaModelRunner(
             hidden_states = self.model.forward(
                 **execute_model_kwargs,
                 selected_token_indices=sampling_metadata.
-                selected_token_indices,
-                bypass_hpu_graphs=not use_graphs)
+                selected_token_indices)
 
         # Compute the logits.
         with self.profiler.record_event(
