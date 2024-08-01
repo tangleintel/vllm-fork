@@ -12,6 +12,8 @@ from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
                                               AttentionMetadata, AttentionType)
 from vllm.attention.ops.habana_paged_attn import (HabanaPagedAttention,
                                                   HabanaPagedAttentionMetadata)
+from vllm.hpu.utils import Matmul, Softmax, VLLMKVCache
+from vllm.hpu import cache_ops
 from vllm.logger import init_logger
 
 logger = init_logger(__name__)
@@ -141,6 +143,11 @@ class HabanaAttentionImpl(AttentionImpl):
         self.num_heads = num_heads
         self.head_size = head_size
         self.scale = float(scale)
+        self.qk_matmul = Matmul()
+        self.softmax = Softmax()
+        self.av_matmul = Matmul()
+        self.key_cache = VLLMKVCache()
+        self.value_cache = VLLMKVCache()
         self.num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
         self.sliding_window = sliding_window
         self.position_bias = None
@@ -204,9 +211,9 @@ class HabanaAttentionImpl(AttentionImpl):
             # Reshape the input keys and values and store them in the cache.
             # If kv_cache is not provided, the new key and value tensors are
             # not cached. This happens during the initial memory profiling run.
-            HabanaPagedAttention.write_to_paged_cache(
-                key, value, key_cache, value_cache, attn_metadata.slot_mapping,
-                self.kv_cache_dtype, attn_metadata.is_prompt)
+            num_kv_cache_passes, num_slots_available, indices, offsets = cache_ops.prepare_to_cache(key_cache, attn_metadata.slot_mapping)
+            key_cache = self.key_cache(key, key_cache, num_kv_cache_passes, num_slots_available, indices, offsets)
+            value_cache = self.value_cache(value, value_cache, num_kv_cache_passes, num_slots_available, indices, offsets)
 
         if attn_metadata.is_prompt:
             # Prompt run.
@@ -255,7 +262,8 @@ class HabanaAttentionImpl(AttentionImpl):
                 query, key_cache, value_cache, attn_metadata.block_tables,
                 attn_metadata.seq_lens_tensor, self.kv_cache_dtype,
                 self.num_kv_heads, self.scale, self.position_bias, k_scale,
-                v_scale)
+                v_scale, self.qk_matmul, self.softmax, self.av_matmul,
+                self.key_cache, self.value_cache)
         # Reshape the output tensor.
         return output.view(batch_size, seq_len, hidden_size)
 
