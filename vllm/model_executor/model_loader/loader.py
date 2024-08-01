@@ -277,10 +277,11 @@ class DefaultModelLoader(BaseModelLoader):
                    scheduler_config: SchedulerConfig,
                    cache_config: CacheConfig) -> nn.Module:
         with set_default_torch_dtype(model_config.dtype):
-            with torch.device(device_config.device):
+            with torch.device(self.load_config.device):
                 model = _initialize_model(model_config, self.load_config,
                                           lora_config, multimodal_config,
                                           cache_config, scheduler_config)
+            logger.info("Loading weights on %s ...", self.load_config.device)
             model.load_weights(
                 self._get_weights_iterator(model_config.model,
                                            model_config.revision,
