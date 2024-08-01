@@ -49,7 +49,7 @@ from vllm.model_executor.model_loader.weight_utils import (
     default_weight_loader, kv_cache_scales_loader, maybe_remap_kv_scale_name)
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.sequence import IntermediateTensors, SamplerOutput
-from vllm.utils import is_hip
+from vllm.utils import is_hip, is_hpu
 
 from .interfaces import SupportsLoRA
 from .utils import PPMissingLayer, is_pp_missing_parameter, make_layers
@@ -317,6 +317,9 @@ class LlamaModel(nn.Module):
             hidden_states = intermediate_tensors["hidden_states"]
             residual = intermediate_tensors["residual"]
 
+        if is_hpu():
+            import habana_frameworks.torch as htorch
+            htorch.core.mark_step()
         for i in range(self.start_layer, self.end_layer):
             layer = self.layers[i]
             hidden_states, residual = layer(
@@ -326,6 +329,8 @@ class LlamaModel(nn.Module):
                 attn_metadata,
                 residual,
             )
+            if is_hpu():
+                htorch.core.mark_step()
 
         if not get_pp_group().is_last_rank:
             return IntermediateTensors({
