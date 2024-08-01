@@ -64,14 +64,13 @@ def prepare_to_cache(cache, slot_mapping):
     return num_kv_cache_passes, num_slots_available, indices, offsets
 
 
-def insert_or_update_cache(input, cache, num_kv_cache_passes,
-                           num_slots_available, block_indices, block_offsets):
+def insert_or_update_cache(input, cache, num_kv_cache_passes, num_slots_available, block_indices, block_offsets):
     for i in range(num_kv_cache_passes):
         start_idx = i * num_slots_available
         end_idx = (i + 1) * num_slots_available
-        cache.index_put_((block_indices[start_idx:end_idx],
-                          block_offsets[start_idx:end_idx]),
-                         input[start_idx:end_idx])
+        cache.index_put_(
+            (block_indices[start_idx:end_idx], block_offsets[start_idx:end_idx]),
+            input[start_idx:end_idx])
 
 
 def swap_blocks(src, dst, block_mapping):
