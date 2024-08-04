@@ -1349,6 +1349,7 @@ class HabanaModelRunner(
         else:
             model_event_name = 'model_executable'
         with self.profiler.record_event('internal', model_event_name):
+            print("libin debug model forward input shape ", execute_model_kwargs["input_ids"].shape)
             hidden_states = self.model.forward(
                 **execute_model_kwargs,
                 selected_token_indices=sampling_metadata.
