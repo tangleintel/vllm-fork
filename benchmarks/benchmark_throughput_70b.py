@@ -86,9 +86,6 @@ def run_vllm(
     download_dir: Optional[str] = None,
     weights_load_device: Optional[str] = None,
 ) -> float:
-    block_size = int(
-        os.environ.get("VLLM_DECODE_BLOCK_BUCKET_STEP", "128")
-    )
     max_num_seqs = int(
         os.environ.get("VLLM_DECODE_BS_BUCKET_MAX", "128")
     )
@@ -113,7 +110,7 @@ def run_vllm(
         enable_chunked_prefill=enable_chunked_prefill,
         max_num_batched_tokens=max_num_batched_tokens,
         weights_load_device=weights_load_device,
-        block_size=block_size,
+        block_size=128,
         max_num_seqs=max_num_seqs,
     )
 
