@@ -84,20 +84,17 @@ def paged_attention_v1(query,
     if query_heads != kv_heads:
         attn_weights = [a.flatten(1, 2) for a in attn_weights]
     attn_weights = sum(attn_weights)
-
-    # import pdb; pdb.set_trace()
+    torch.hpu.synchronize()
+    end_time = time.time()
 
     flops = flops_counter(num_att_heads=query.shape[1],
                             query_seq_len=query.shape[2],
                             block_size=block_size,
                             context_lens=context_lens,
                             query_embedding_dim=query.shape[3],
-                            value_embedding_dim=key_cache.shape[3])
-    torch.hpu.synchronize()
-    end_time = time.time()
-
-    tflops = flops / (end_time - start_time) / 1e12
-    habana_profiler.record_counter(habana_profiler.get_timestamp_us(), {"TFLOPS": tflops})
+                            value_embedding_dim=key_cache.shape[3],
+                            duration=end_time - start_time)
+    habana_profiler.record_counter(habana_profiler.get_timestamp_us(), {"TFLOPS": flops / 1e12})
     
     return attn_weights.squeeze(-2)
 
@@ -179,6 +176,7 @@ def flops_counter(num_att_heads,
                    block_size, 
                    context_lens, 
                    query_embedding_dim, 
-                   value_embedding_dim) -> float:
-    return sum([num_att_heads * query_seq_len * ceil(S_i / block_size) * block_size 
-                * 2 * (query_embedding_dim + value_embedding_dim) for S_i in context_lens])
+                   value_embedding_dim,
+                   duration) -> float:
+    return sum([num_att_heads * query_seq_len * ceil(S_i / block_size) * block_size * 2 * 
+                (query_embedding_dim + value_embedding_dim) for S_i in context_lens]) / duration
