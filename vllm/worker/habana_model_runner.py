@@ -116,7 +116,7 @@ def warmup_range_with_limit(config: Tuple[int, int, int, int]):
         best_out = None
         assert num_buckets > 0, "num_buckets must be a positive integer"
         if num_buckets == 1 or bucket_min == bucket_max:
-            return bucket_max
+            return [bucket_max]
         for i in range(num_tries):
             ls = np.linspace(fn_start, fn_end, num=num_buckets + i)
             fn_min = fn(ls[0])
