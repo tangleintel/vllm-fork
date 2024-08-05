@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 ###############################################################################
 import os
+from math import ceil
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -88,6 +89,16 @@ def flat_pa(query,
     attn = attn.squeeze(-2)
     if kv_heads != q_heads:
         attn = attn.flatten(1, 2)
+
+    import pdb; pdb.set_trace()
+
+    flops = flops_counter(num_att_heads=query.shape[1],
+                        query_seq_len=query.shape[2],
+                        block_size=1,
+                        context_lens=[1, 1, 1, 1],
+                        query_embedding_dim=query.shape[3],
+                        value_embedding_dim=value.shape[3])
+    
     return attn
 
 
@@ -168,3 +179,13 @@ def static_fused_moe(hidden_states, w1, w2, score, topk):
         htorch.core.mark_step()
 
     return final_hidden_states.view(-1, D)
+
+
+def flops_counter(num_att_heads, 
+                   query_seq_len, 
+                   block_size, 
+                   context_lens, 
+                   query_embedding_dim, 
+                   value_embedding_dim) -> float:
+    return sum([num_att_heads * query_seq_len * ceil(S_i / block_size) * block_size 
+                * 2 * (query_embedding_dim + value_embedding_dim) for S_i in context_lens])
