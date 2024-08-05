@@ -7,7 +7,7 @@ You can download the dataset by running:
 wget https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_V3_unfiltered_cleaned_split.json
 ```
 
-## Benchmark throughput with Llama2 7b on Gaudi2 / Gaudi2D
+## Benchmark throughput with Llama2 7b on 1x Gaudi2 / Gaudi2D
 
 ### BF16
 ```bash
@@ -37,6 +37,31 @@ QUANT_CONFIG=hqt/config_maxabs_hw_quant.json \
   VLLM_DECODE_BLOCK_BUCKET_MIN=64 \
   python benchmark_throughput.py \
     --model meta-llama/Llama-2-7b-chat-hf  \
+    --device hpu \
+    --seed 2024 \
+    --backend vllm \
+    --dataset ShareGPT_V3_unfiltered_cleaned_split.json \
+    --num-prompts 1000 \
+    --dtype bfloat16 \
+    --quantization hqt \
+    --kv-cache-dtype hf8 \
+    --weights-load-device cpu
+```
+
+## Benchmark throughput with Llama2 70b on 1x Gaudi2 / Gaudi2D
+
+### FP8
+```bash
+QUANT_CONFIG=hqt/1x_70b_config_maxabs_hw_quant.json \
+  PT_HPU_WEIGHT_SHARING=0 \
+  VLLM_PROMPT_BS_BUCKET_MIN=1 \
+  VLLM_PROMPT_BS_BUCKET_STEP=8 \
+  VLLM_PROMPT_BS_BUCKET_MAX=24 \
+  VLLM_DECODE_BS_BUCKET_MIN=1 \
+  VLLM_DECODE_BS_BUCKET_STEP=16 \
+  VLLM_DECODE_BS_BUCKET_MAX=64 \
+  python benchmark_throughput.py \
+    --model meta-llama/Llama-2-70b-chat-hf  \
     --device hpu \
     --seed 2024 \
     --backend vllm \
