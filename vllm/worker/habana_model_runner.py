@@ -147,6 +147,16 @@ def align_workers(value, op):
     return value_t.item()
 
 
+def flops_counter(num_att_heads, 
+                   query_seq_len, 
+                   block_size, 
+                   context_lens, 
+                   query_embedding_dim, 
+                   value_embedding_dim) -> float:
+    return sum([num_att_heads * query_seq_len * math.ceil(S_i / block_size) * block_size 
+                * 2 * (query_embedding_dim + value_embedding_dim) for S_i in context_lens])
+
+
 class HpuModelAdapter():
 
     def __init__(self, model, enforce_eager):
@@ -1184,7 +1194,7 @@ class HabanaProfilerCounterHelper():
         ]
 
     def get_counter_dict(self, cache_config, duration, seq_len,
-                         batch_size_padded, real_batch_size, is_prompt):
+                         batch_size_padded, real_batch_size, is_prompt, flops = 0):
         throughput = batch_size_padded / (duration / 1e6)
         throughput_effective = real_batch_size / (duration / 1e6)
 
@@ -1192,6 +1202,7 @@ class HabanaProfilerCounterHelper():
         real_num_tokens = sum(self.real_seq_lens)
         padded_num_tokens = batch_size_padded * seq_len
         batch_token_utilization = real_num_tokens / padded_num_tokens
+        tflops = flops / duration / 1e12
         if self.average_real_throughput is None:
             self.average_real_throughput = throughput_effective
         else:  # https://www.heikohoffmann.de/htmlthesis/node134.html
@@ -1209,6 +1220,7 @@ class HabanaProfilerCounterHelper():
             f'{phase}_batch_token_utilization': batch_token_utilization,
             'average_real_throughput': self.average_real_throughput,
             'engine_iteration': self.niter,
+            'tflops': tflops
         }
         self.niter += 1
         if is_prompt:
@@ -1381,6 +1393,19 @@ class HabanaModelRunner(
             )
         output.outputs = output.outputs[:real_batch_size]
         htorch.core.mark_step()
+            
+        #import pdb; pdb.set_trace()
+
+        print(self.model_config.get_num_attention_heads(self.parallel_config))
+        print(seq_len)
+        print(self.block_size)
+
+        flops = flops_counter(num_att_heads=self.model_config.get_num_attention_heads(self.parallel_config),
+                                query_seq_len=seq_len,
+                                block_size=self.block_size,
+                                context_lens=[1, 1, 1, 1],
+                                query_embedding_dim=1,
+                                value_embedding_dim=1)
 
         if self.is_driver_worker and self.profiler.enabled:
             # Stop recording 'execute_model' event
@@ -1392,6 +1417,7 @@ class HabanaModelRunner(
                 seq_len=seq_len,
                 batch_size_padded=batch_size_padded,
                 real_batch_size=real_batch_size,
-                is_prompt=is_prompt)
+                is_prompt=is_prompt,
+                flops=flops)
             self.profiler.record_counter(self.event_start, counters)
         return [output]
