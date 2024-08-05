@@ -10,12 +10,12 @@ import math
 import operator
 import os
 import time
-import numpy as np
 from enum import IntEnum
 from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
                     Optional, Set, Tuple, Type, TypeVar, Union)
 
 import habana_frameworks.torch as htorch
+import numpy as np
 import torch
 
 from vllm.attention import AttentionMetadata, get_attn_backend
@@ -94,7 +94,9 @@ def warmup_range(config: Tuple[int, int, int]):
     stable = range(bstep, bmax + 1, bstep)
     return list(ramp_up_tw) + list(stable)
 
+
 def warmup_range_with_limit(config: Tuple[int, int, int, int]):
+
     def find_bucket(value: int, config: Tuple[int, int, int]):
         bmin, bstep, bmax = config
         if value < bstep:
@@ -102,37 +104,52 @@ def warmup_range_with_limit(config: Tuple[int, int, int, int]):
         else:
             result = round_up(value, bstep)
         return result
-    def quantize_bucketing_fn(bucket_config, num_buckets, fn = lambda x: np.tanh(x), fn_start = -1, fn_end = 0, no_duplicate_buckets = True, num_tries=10):
-        min, step, max = bucket_config
+
+    def quantize_bucketing_fn(bucket_config,
+                              num_buckets,
+                              fn=lambda x: np.tanh(x),
+                              fn_start=-1,
+                              fn_end=0,
+                              no_duplicate_buckets=True,
+                              num_tries=10):
+        bucket_min, _, bucket_max = bucket_config
         best_out = None
         assert num_buckets > 0, "num_buckets must be a positive integer"
-        if num_buckets == 1:
-            return max
+        if num_buckets == 1 or bucket_min == bucket_max:
+            return bucket_max
         for i in range(num_tries):
-            ls = np.linspace(fn_start, fn_end, num=num_buckets+i)
+            ls = np.linspace(fn_start, fn_end, num=num_buckets + i)
             fn_min = fn(ls[0])
             fn_max = fn(ls[-1])
-            shifted_fn = lambda x: (fn(x)-fn_min)/(fn_max-fn_min) * (max-min) + min
-            buckets = [shifted_fn(i) for i in ls]
-            out = list(sorted({int(find_bucket(b, bucket_config)) for b in buckets}))
+            # shift interval [fn_min,fn_max] into [bucket_min,bucket_max]
+            # with linear interpolation
+            shifted_fn = lambda x, fn_min, fn_max: (fn(x) - fn_min) / (
+                fn_max - fn_min) * (bucket_max - bucket_min) + bucket_min
+            buckets = [shifted_fn(i, fn_min, fn_max) for i in ls]
+            out = list(
+                sorted({int(find_bucket(b, bucket_config))
+                        for b in buckets}))
             if not no_duplicate_buckets or len(out) == num_buckets:
                 return out
-            if best_out is None or len(out) < num_buckets and len(best_out) <= len(out):
+            if best_out is None or len(out) < num_buckets and len(
+                    best_out) <= len(out):
                 best_out = out
         return best_out
-    return quantize_bucketing_fn(config[:3], config[3]) 
+
+    return quantize_bucketing_fn(config[:3], config[3])
+
 
 def warmup_buckets(bs_bucket_config, seq_bucket_config):
     bs_buckets = warmup_range(bs_bucket_config[:3])
     seq_len_buckets = warmup_range(seq_bucket_config[:3])
     if bs_bucket_config[3] != 0 and len(bs_buckets) > bs_bucket_config[3]:
         bs_buckets = warmup_range_with_limit(bs_bucket_config)
-    if seq_bucket_config[3] != 0 and len(seq_len_buckets) > seq_bucket_config[3]:
+    if seq_bucket_config[3] != 0 and len(
+            seq_len_buckets) > seq_bucket_config[3]:
         seq_len_buckets = warmup_range_with_limit(seq_bucket_config)
 
-
     buckets = itertools.product(bs_buckets, seq_len_buckets)
-    return list(sorted(buckets, key=lambda b: (b[0] * b[1], b[1], b[0]))) 
+    return list(sorted(buckets, key=lambda b: (b[0] * b[1], b[1], b[0])))
 
 
 def next_pow2(value: int):
@@ -495,22 +512,26 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                          step=32,
                                                          max=min(
                                                              self.max_num_seqs,
-                                                             64), limit=0)
+                                                             64),
+                                                         limit=0)
         self.decode_bs_bucket_cfg = read_bucket_settings('decode',
                                                          'bs',
                                                          min=1,
                                                          step=128,
-                                                         max=self.max_num_seqs, limit=0)
+                                                         max=self.max_num_seqs,
+                                                         limit=0)
         self.prompt_seq_bucket_cfg = read_bucket_settings('prompt',
                                                           'seq',
                                                           min=self.block_size,
                                                           step=self.block_size,
-                                                          max=1024, limit=0)
+                                                          max=1024,
+                                                          limit=0)
         self.decode_seq_bucket_cfg = read_bucket_settings('decode',
                                                           'seq',
                                                           min=self.block_size,
                                                           step=self.block_size,
-                                                          max=2048, limit=0)
+                                                          max=2048,
+                                                          limit=0)
         self.graphed_buckets: Set[Any] = set()
 
         msg = ("Prompt bucket config (min, step, max_warmup, limit) "
@@ -530,11 +551,18 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         logger.info(msg)
         self.decode_buckets = warmup_buckets(self.decode_bs_bucket_cfg,
                                              self.decode_seq_bucket_cfg)
-        
-        find_bucket = lambda bucket, x: next(p for p in sorted(bucket) if p >= x)
+
+        find_bucket = lambda bucket, x: next(p for p in sorted(bucket)
+                                             if p >= x)
         get_bucket_dim = lambda bucket, dim: [b[dim] for b in bucket]
-        self.find_bs_bucket = lambda x, is_prompt: find_bucket(get_bucket_dim(self.prompt_buckets if is_prompt else self.decode_buckets, 0), x)
-        self.find_seq_bucket = lambda x, is_prompt: find_bucket(get_bucket_dim(self.prompt_buckets if is_prompt else self.decode_buckets, 1), x)
+        self.find_bs_bucket = lambda x, is_prompt: find_bucket(
+            get_bucket_dim(
+                self.prompt_buckets
+                if is_prompt else self.decode_buckets, 0), x)
+        self.find_seq_bucket = lambda x, is_prompt: find_bucket(
+            get_bucket_dim(
+                self.prompt_buckets
+                if is_prompt else self.decode_buckets, 1), x)
         msg = (f"Generated {len(self.decode_buckets)} decode buckets: "
                f"{list(sorted(self.decode_buckets))}")
         logger.info(msg)
@@ -677,9 +705,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             multi_modal_input = None
 
         max_prompt_block_table_len = max(len(t) for t in prefix_block_tables)
-        max_prompt_len = max(
-            self.find_seq_bucket(max(seq_lens), True),
-            self.block_size)
+        max_prompt_len = max(self.find_seq_bucket(max(seq_lens), True),
+                             self.block_size)
 
         input_tokens = make_tensor_with_pad(input_tokens,
                                             max_len=max_prompt_len,
@@ -872,8 +899,6 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.profiler.start('internal', base_event_name)
 
         real_batch_size = len(seq_group_metadata_list)
-        bucket_cfg = self.prompt_bs_bucket_cfg if is_prompt else \
-            self.decode_bs_bucket_cfg
         batch_size_padded = self.find_bs_bucket(real_batch_size, is_prompt)
         batch_size_padding = batch_size_padded - real_batch_size
         seq_group_metadata_list = seq_group_metadata_list.copy()
