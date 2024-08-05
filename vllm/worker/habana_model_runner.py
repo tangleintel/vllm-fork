@@ -1208,7 +1208,7 @@ class HabanaProfilerCounterHelper():
             f'{phase}_real_gen_throughput': throughput_effective,
             f'{phase}_batch_token_utilization': batch_token_utilization,
             'average_real_throughput': self.average_real_throughput,
-            'engine_iteration': self.niter
+            'engine_iteration': self.niter,
         }
         self.niter += 1
         if is_prompt:

@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 ###############################################################################
 import os
+import time
 from math import ceil
 from typing import Optional
 
@@ -13,6 +14,7 @@ import torch
 import torch.nn.functional as F
 
 import vllm.hpu.utils as hpu_utils
+from vllm.worker.profiler import Profiler
 
 PA_SPLIT_VALUE = (os.environ.get('PA_SPLIT_VALUE', '1') == '1')
 
@@ -42,6 +44,9 @@ def paged_attention_v1(query,
                        block_size,
                        alibi_slopes=None,
                        kv_cache_dtype=None) -> None:
+    habana_profiler = Profiler()
+    torch.hpu.synchronize()
+    start_time = time.time()
     seq_len = block_tables.size(1)
     batch_size, query_heads, _ = query.shape
     _, _, kv_heads, _ = key_cache.shape
@@ -88,8 +93,13 @@ def paged_attention_v1(query,
                             context_lens=context_lens,
                             query_embedding_dim=query.shape[3],
                             value_embedding_dim=key_cache.shape[3])
-    print("FLOPS: ", flops)
+    torch.hpu.synchronize()
+    end_time = time.time()
+    execution_time = end_time - start_time
+    tflops = flops / execution_time / 1e12
+    print("FLOPS: ", tflops)
     
+    habana_profiler.record_counter(habana_profiler.get_timestamp_us(), {"TFLOPS": tflops})
     return attn_weights.squeeze(-2)
 
 
