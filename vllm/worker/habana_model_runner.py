@@ -10,6 +10,7 @@ import math
 import operator
 import os
 import time
+import numpy as np
 from enum import IntEnum
 from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
                     Optional, Set, Tuple, Type, TypeVar, Union)
@@ -60,7 +61,7 @@ def read_bucket_settings(phase: str, dim: str, **defaults):
     param is either 'min', 'step' or 'max'
     example env variable: VLLM_DECODE_BS_BUCKET_STEP=128
     """
-    params = ['min', 'step', 'max']
+    params = ['min', 'step', 'max', 'limit']
     values = [
         int(
             os.environ.get(f'VLLM_{phase}_{dim}_BUCKET_{p}'.upper(),
@@ -93,11 +94,45 @@ def warmup_range(config: Tuple[int, int, int]):
     stable = range(bstep, bmax + 1, bstep)
     return list(ramp_up_tw) + list(stable)
 
+def warmup_range_with_limit(config: Tuple[int, int, int, int]):
+    def find_bucket(value: int, config: Tuple[int, int, int]):
+        bmin, bstep, bmax = config
+        if value < bstep:
+            result = min(next_pow2(value), bstep)
+        else:
+            result = round_up(value, bstep)
+        return result
+    def quantize_bucketing_fn(bucket_config, num_buckets, fn = lambda x: np.tanh(x), fn_start = -1, fn_end = 0, no_duplicate_buckets = True, num_tries=10):
+        min, step, max = bucket_config
+        best_out = None
+        assert num_buckets > 0, "num_buckets must be a positive integer"
+        if num_buckets == 1:
+            return max
+        for i in range(num_tries):
+            ls = np.linspace(fn_start, fn_end, num=num_buckets+i)
+            fn_min = fn(ls[0])
+            fn_max = fn(ls[-1])
+            shifted_fn = lambda x: (fn(x)-fn_min)/(fn_max-fn_min) * (max-min) + min
+            buckets = [shifted_fn(i) for i in ls]
+            out = list(sorted({int(find_bucket(b, bucket_config)) for b in buckets}))
+            if not no_duplicate_buckets or len(out) == num_buckets:
+                return out
+            if best_out is None or len(out) < num_buckets and len(best_out) <= len(out):
+                best_out = out
+        return best_out
+    return quantize_bucketing_fn(config[:3], config[3]) 
 
 def warmup_buckets(bs_bucket_config, seq_bucket_config):
-    buckets = itertools.product(warmup_range(bs_bucket_config),
-                                warmup_range(seq_bucket_config))
-    return list(sorted(buckets, key=lambda b: (b[0] * b[1], b[1], b[0])))
+    bs_buckets = warmup_range(bs_bucket_config[:3])
+    seq_len_buckets = warmup_range(seq_bucket_config[:3])
+    if bs_bucket_config[3] != 0 and len(bs_buckets) > bs_bucket_config[3]:
+        bs_buckets = warmup_range_with_limit(bs_bucket_config)
+    if seq_bucket_config[3] != 0 and len(seq_len_buckets) > seq_bucket_config[3]:
+        seq_len_buckets = warmup_range_with_limit(seq_bucket_config)
+
+
+    buckets = itertools.product(bs_buckets, seq_len_buckets)
+    return list(sorted(buckets, key=lambda b: (b[0] * b[1], b[1], b[0]))) 
 
 
 def next_pow2(value: int):
@@ -110,15 +145,6 @@ def next_pow2(value: int):
 
 def round_up(value: int, k: int):
     return (value + k - 1) // k * k
-
-
-def find_bucket(value: int, config: Tuple[int, int, int]):
-    bmin, bstep, bmax = config
-    if value < bstep:
-        result = min(next_pow2(value), bstep)
-    else:
-        result = round_up(value, bstep)
-    return result
 
 
 def subtuple(obj: object,
@@ -469,25 +495,25 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                          step=32,
                                                          max=min(
                                                              self.max_num_seqs,
-                                                             64))
+                                                             64), limit=0)
         self.decode_bs_bucket_cfg = read_bucket_settings('decode',
                                                          'bs',
                                                          min=1,
                                                          step=128,
-                                                         max=self.max_num_seqs)
+                                                         max=self.max_num_seqs, limit=0)
         self.prompt_seq_bucket_cfg = read_bucket_settings('prompt',
                                                           'seq',
                                                           min=self.block_size,
                                                           step=self.block_size,
-                                                          max=1024)
+                                                          max=1024, limit=0)
         self.decode_seq_bucket_cfg = read_bucket_settings('decode',
                                                           'seq',
                                                           min=self.block_size,
                                                           step=self.block_size,
-                                                          max=2048)
+                                                          max=2048, limit=0)
         self.graphed_buckets: Set[Any] = set()
 
-        msg = ("Prompt bucket config (min, step, max_warmup) "
+        msg = ("Prompt bucket config (min, step, max_warmup, limit) "
                f"bs:{self.prompt_bs_bucket_cfg}, "
                f"seq:{self.prompt_seq_bucket_cfg}")
         logger.info(msg)
@@ -498,12 +524,17 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                f"prompt buckets: {list(sorted(self.prompt_buckets))}")
         logger.info(msg)
 
-        msg = ("Decode bucket config (min, step, max_warmup) "
+        msg = ("Decode bucket config (min, step, max_warmup, limit) "
                f"bs:{self.decode_bs_bucket_cfg}, "
                f"seq:{self.decode_seq_bucket_cfg}")
         logger.info(msg)
         self.decode_buckets = warmup_buckets(self.decode_bs_bucket_cfg,
                                              self.decode_seq_bucket_cfg)
+        
+        find_bucket = lambda bucket, x: next(p for p in sorted(bucket) if p >= x)
+        get_bucket_dim = lambda bucket, dim: [b[dim] for b in bucket]
+        self.find_bs_bucket = lambda x, is_prompt: find_bucket(get_bucket_dim(self.prompt_buckets if is_prompt else self.decode_buckets)[0], x)
+        self.find_seq_bucket = lambda x, is_prompt: find_bucket(get_bucket_dim(self.prompt_buckets if is_prompt else self.decode_buckets)[1], x)
         msg = (f"Generated {len(self.decode_buckets)} decode buckets: "
                f"{list(sorted(self.decode_buckets))}")
         logger.info(msg)
@@ -647,7 +678,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         max_prompt_block_table_len = max(len(t) for t in prefix_block_tables)
         max_prompt_len = max(
-            find_bucket(max(seq_lens), self.prompt_seq_bucket_cfg),
+            self.find_seq_bucket(max(seq_lens), self.prompt_seq_bucket_cfg, True),
             self.block_size)
 
         input_tokens = make_tensor_with_pad(input_tokens,
@@ -843,7 +874,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         real_batch_size = len(seq_group_metadata_list)
         bucket_cfg = self.prompt_bs_bucket_cfg if is_prompt else \
             self.decode_bs_bucket_cfg
-        batch_size_padded = find_bucket(real_batch_size, bucket_cfg)
+        batch_size_padded = self.find_bs_bucket(real_batch_size, bucket_cfg, is_prompt)
         batch_size_padding = batch_size_padded - real_batch_size
         seq_group_metadata_list = seq_group_metadata_list.copy()
         seq_group_metadata_list.extend(seq_group_metadata_list[0]
