@@ -95,11 +95,10 @@ def paged_attention_v1(query,
                             value_embedding_dim=key_cache.shape[3])
     torch.hpu.synchronize()
     end_time = time.time()
-    execution_time = end_time - start_time
-    tflops = flops / execution_time / 1e12
-    print("FLOPS: ", tflops)
-    
+
+    tflops = flops / (end_time - start_time) / 1e12
     habana_profiler.record_counter(habana_profiler.get_timestamp_us(), {"TFLOPS": tflops})
+    
     return attn_weights.squeeze(-2)
 
 
