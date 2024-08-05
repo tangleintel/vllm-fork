@@ -533,8 +533,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         
         find_bucket = lambda bucket, x: next(p for p in sorted(bucket) if p >= x)
         get_bucket_dim = lambda bucket, dim: [b[dim] for b in bucket]
-        self.find_bs_bucket = lambda x, is_prompt: find_bucket(get_bucket_dim(self.prompt_buckets if is_prompt else self.decode_buckets)[0], x)
-        self.find_seq_bucket = lambda x, is_prompt: find_bucket(get_bucket_dim(self.prompt_buckets if is_prompt else self.decode_buckets)[1], x)
+        self.find_bs_bucket = lambda x, is_prompt: find_bucket(get_bucket_dim(self.prompt_buckets if is_prompt else self.decode_buckets, 0), x)
+        self.find_seq_bucket = lambda x, is_prompt: find_bucket(get_bucket_dim(self.prompt_buckets if is_prompt else self.decode_buckets, 1), x)
         msg = (f"Generated {len(self.decode_buckets)} decode buckets: "
                f"{list(sorted(self.decode_buckets))}")
         logger.info(msg)
@@ -678,7 +678,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         max_prompt_block_table_len = max(len(t) for t in prefix_block_tables)
         max_prompt_len = max(
-            self.find_seq_bucket(max(seq_lens), self.prompt_seq_bucket_cfg, True),
+            self.find_seq_bucket(max(seq_lens), True),
             self.block_size)
 
         input_tokens = make_tensor_with_pad(input_tokens,
@@ -874,7 +874,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         real_batch_size = len(seq_group_metadata_list)
         bucket_cfg = self.prompt_bs_bucket_cfg if is_prompt else \
             self.decode_bs_bucket_cfg
-        batch_size_padded = self.find_bs_bucket(real_batch_size, bucket_cfg, is_prompt)
+        batch_size_padded = self.find_bs_bucket(real_batch_size, is_prompt)
         batch_size_padding = batch_size_padded - real_batch_size
         seq_group_metadata_list = seq_group_metadata_list.copy()
         seq_group_metadata_list.extend(seq_group_metadata_list[0]
@@ -1060,8 +1060,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def profile_run(self) -> None:
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         kv_caches = [None] * num_layers
-        max_batch_size = self.prompt_bs_bucket_cfg[-1]
-        max_seq_len = self.prompt_seq_bucket_cfg[-1]
+        max_batch_size = self.prompt_bs_bucket_cfg[-2]
+        max_seq_len = self.prompt_seq_bucket_cfg[-2]
 
         self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches)
 
