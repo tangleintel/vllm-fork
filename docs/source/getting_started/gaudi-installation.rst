@@ -143,7 +143,7 @@ Execution modes
 
 Currently in vLLM for HPU we support four execution modes, depending on selected HPU PyTorch Bridge backend (via ``PT_HPU_LAZY_MODE`` environment variable), and ``--enforce-eager`` flag.  
 
-.. list-table:: Title
+.. list-table:: vLLM execution modes
    :widths: 25 25 50
    :header-rows: 1
 
