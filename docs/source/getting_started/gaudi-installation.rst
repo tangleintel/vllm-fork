@@ -164,8 +164,9 @@ Currently in vLLM for HPU we support four execution modes, depending on selected
      - PyTorch lazy mode
 
 .. warning::
-   Currently all modes utilizing 
-``PT_HPU_LAZY_MODE``
+   In 1.17.0, all modes utilizing ``PT_HPU_LAZY_MODE=0`` are highly experimental and should be only used for validating functional correctness. Their performance will be improved in the next releases. For obtaining the best performance in 1.17.0, please use HPUGraphs, or PyTorch lazy mode.
+
+
 Bucketing mechanism
 ------------
 
