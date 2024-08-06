@@ -186,7 +186,7 @@ class LLMEngine:
             "quantization_param_path=%s, device_config=%s, "
             "decoding_config=%r, observability_config=%r, "
             "seed=%d, served_model_name=%s, use_v2_block_manager=%s, "
-            "enable_prefix_caching=%s)",
+            "enable_prefix_caching=%s, split_qk_v=%s)",
             VLLM_VERSION,
             model_config.model,
             speculative_config,
@@ -217,6 +217,7 @@ class LLMEngine:
             model_config.served_model_name,
             scheduler_config.use_v2_block_manager,
             cache_config.enable_prefix_caching,
+            cache_config.split_qk_v,
         )
         # TODO(woosuk): Print more configs in debug mode.
 
@@ -300,6 +301,8 @@ class LLMEngine:
                     model_config.enforce_eager,
                     "disable_custom_all_reduce":
                     parallel_config.disable_custom_all_reduce,
+                    "split_qk_v":
+                    cache_config.split_qk_v,
                 })
 
         if self.tokenizer:
