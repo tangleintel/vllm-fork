@@ -33,7 +33,6 @@ def fetch_from_cache(cache, blocks, permutations):
     ]
 
 
-@hpu_utils.with_mark_steps
 def paged_attention_v1(query,
                        key_cache,
                        value_cache,
@@ -47,6 +46,8 @@ def paged_attention_v1(query,
     habana_profiler = Profiler()
     torch.hpu.synchronize()
     start_time = time.time()
+
+    htorch.core.mark_step()
     seq_len = block_tables.size(1)
     batch_size, query_heads, _ = query.shape
     _, _, kv_heads, _ = key_cache.shape
@@ -84,13 +85,16 @@ def paged_attention_v1(query,
     if query_heads != kv_heads:
         attn_weights = [a.flatten(1, 2) for a in attn_weights]
     attn_weights = sum(attn_weights)
+    htorch.core.mark_step()
+
     torch.hpu.synchronize()
     end_time = time.time()
 
-    flops = flops_counter(num_att_heads=query.shape[1],
+    flops = flops_counter_decode(num_att_heads=query.shape[1],
+                            batch_size=batch_size,
                             query_seq_len=query.shape[2],
+                            max_seq_len=key_cache.shape[1],
                             block_size=block_size,
-                            context_lens=context_lens,
                             query_embedding_dim=query.shape[3],
                             value_embedding_dim=key_cache.shape[3],
                             duration=end_time - start_time)
@@ -141,7 +145,6 @@ def static_fused_moe(hidden_states, w1, w2, score, topk):
     return final_hidden_states.view(-1, D)
 
 
-@hpu_utils.with_mark_steps
 def prompt_attention(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -150,6 +153,10 @@ def prompt_attention(
     p: float = 0.0,
     scale: Optional[float] = None,
 ) -> torch.Tensor:
+    habana_profiler = Profiler()
+    start_time = time.time()
+
+    htorch.core.mark_step()
     query = query.transpose(1, 2)
     key = key.transpose(1, 2)
     value = value.transpose(1, 2)
@@ -168,15 +175,39 @@ def prompt_attention(
     if query_heads != kv_heads:
         attn_weights = attn_weights.flatten(1, 2)
     attn_weights = attn_weights.transpose(1, 2)
+    htorch.core.mark_step()
+    
+    end_time = time.time()
+    flops = flops_counter_prompt(num_att_heads=query.shape[1],
+                            batch_size=query.shape[0],
+                            query_seq_len=query.shape[2],
+                            max_seq_len=key.shape[1],
+                            query_embedding_dim=query.shape[3],
+                            value_embedding_dim=key.shape[3],
+                            duration=end_time - start_time)
+    habana_profiler.record_counter(habana_profiler.get_timestamp_us(), {"TFLOPS": flops / 1e12})
+
     return attn_weights
 
 
-def flops_counter(num_att_heads, 
-                   query_seq_len, 
-                   block_size, 
-                   context_lens, 
-                   query_embedding_dim, 
-                   value_embedding_dim,
-                   duration) -> float:
-    return sum([num_att_heads * query_seq_len * ceil(S_i / block_size) * block_size * 2 * 
-                (query_embedding_dim + value_embedding_dim) for S_i in context_lens]) / duration
+def flops_counter_decode(num_att_heads, 
+                         batch_size,
+                        query_seq_len, 
+                        max_seq_len,
+                        block_size, 
+                        query_embedding_dim, 
+                        value_embedding_dim,
+                        duration) -> float:
+    return (batch_size * num_att_heads * query_seq_len * ceil(max_seq_len / block_size) 
+            * block_size * 2 * (query_embedding_dim + value_embedding_dim) / duration)
+
+
+def flops_counter_prompt(num_att_heads, 
+                         batch_size,
+                        query_seq_len, 
+                        max_seq_len,
+                        query_embedding_dim, 
+                        value_embedding_dim,
+                        duration) -> float:
+    return (batch_size * num_att_heads * query_seq_len * max_seq_len * 2 
+            * (query_embedding_dim + value_embedding_dim) / duration)
