@@ -6,6 +6,7 @@
 ###############################################################################
 import os
 from math import ceil
+import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -13,6 +14,7 @@ import habana_frameworks.torch as htorch
 from typing import List, Optional, Tuple
 
 import vllm.hpu.utils as hpu_utils
+from vllm.worker.profiler import Profiler
 
 PA_SPLIT_VALUE = (os.environ.get('PA_SPLIT_VALUE', '1') == '1')
 
@@ -64,6 +66,9 @@ def flat_pa(query,
             kv_matmul_op,
             keys_fetch_func,
             values_fetch_func):
+    habana_profiler = Profiler()
+    start_time = time.time()
+
     batch_size = query.size(0)
     q_heads = query.size(1)
     kv_heads = key_cache.size(2)
@@ -92,12 +97,15 @@ def flat_pa(query,
 
     import pdb; pdb.set_trace()
 
-    flops = flops_counter(num_att_heads=query.shape[1],
-                        query_seq_len=query.shape[2],
-                        block_size=1,
-                        context_lens=[1, 1, 1, 1],
-                        query_embedding_dim=query.shape[3],
-                        value_embedding_dim=value.shape[3])
+    end_time = time.time()
+    # flops = flops_counter_flat_pa(num_att_heads=query.shape[1],
+    #                         batch_size=query.shape[0],
+    #                         query_seq_len=query.shape[2],
+    #                         max_seq_len=key.shape[1],
+    #                         query_embedding_dim=query.shape[3],
+    #                         value_embedding_dim=key.shape[3],
+    #                         duration=end_time - start_time)
+    habana_profiler.record_counter(habana_profiler.get_timestamp_us(), {"TFLOPS": flops / 1e12})
     
     return attn
 
@@ -181,7 +189,7 @@ def static_fused_moe(hidden_states, w1, w2, score, topk):
     return final_hidden_states.view(-1, D)
 
 
-def flops_counter(num_att_heads, 
+def flops_counter_flat_pa(num_att_heads, 
                    query_seq_len, 
                    block_size, 
                    context_lens, 
