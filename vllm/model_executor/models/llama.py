@@ -140,6 +140,7 @@ class LlamaAttention(nn.Module):
             bias=bias,
             quant_config=quant_config,
             prefix=f"{prefix}.qkv_proj",
+            split_qk_v=cache_config.split_qk_v,
         )
         self.o_proj = RowParallelLinear(
             input_size=self.total_num_heads * self.head_dim,
@@ -386,6 +387,7 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA):
 
         self.config = config
         self.lora_config = lora_config
+        self.split_qk_v = cache_config.split_qk_v
 
         self.model = LlamaModel(config,
                                 cache_config,
@@ -464,10 +466,13 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA):
             # (param_name, shard_name, shard_id)
             (".qkv_proj", ".q_proj", "q"),
             (".qkv_proj", ".k_proj", "k"),
-            (".qkv_proj", ".v_proj", "v"),
             (".gate_up_proj", ".gate_proj", 0),
             (".gate_up_proj", ".up_proj", 1),
         ]
+        if self.split_qk_v:
+            stacked_params_mapping.append((".qkv_proj.v_proj", ".v_proj", "v"))
+        else:
+            stacked_params_mapping.append((".qkv_proj", ".v_proj", "v"))
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in weights:
             if "rotary_emb.inv_freq" in name:
@@ -498,7 +503,10 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA):
 
                 param = params_dict[name]
                 weight_loader = param.weight_loader
-                weight_loader(param, loaded_weight, shard_id)
+                if self.split_qk_v and shard_id == "v":
+                    weight_loader(param, loaded_weight)
+                else:
+                    weight_loader(param, loaded_weight, shard_id)
 
                 break
             else:
