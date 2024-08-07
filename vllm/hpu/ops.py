@@ -90,8 +90,6 @@ def paged_attention_v1(query,
     torch.hpu.synchronize()
     end_time = time.time()
 
-    print(key_cache.shape)
-
     flops = flops_counter_decode(num_att_heads=query.shape[1],
                             batch_size=batch_size,
                             query_seq_len=query.shape[2],
@@ -178,8 +176,6 @@ def prompt_attention(
         attn_weights = attn_weights.flatten(1, 2)
     attn_weights = attn_weights.transpose(1, 2)
     htorch.core.mark_step()
-
-    print(key.shape)
     
     end_time = time.time()
     flops = flops_counter_prompt(num_att_heads=query.shape[1],
