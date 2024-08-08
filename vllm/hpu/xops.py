@@ -47,13 +47,13 @@ def prompt_attention(
     attn_weights = attn_weights.transpose(1, 2)
 
     end_time = time.time()
-    # flops = flops_counter_prompt(num_att_heads=query.shape[1],
-    #                         batch_size=query.shape[0],
-    #                         query_seq_len=query.shape[2],
-    #                         max_seq_len=key.shape[1],
-    #                         query_embedding_dim=query.shape[3],
-    #                         value_embedding_dim=key.shape[3],
-    #                         duration=end_time - start_time)
+    flops = flops_counter_prompt(num_att_heads=query.shape[1],
+                            batch_size=query.shape[0],
+                            query_seq_len=query.shape[2],
+                            max_seq_len=key.shape[2],
+                            query_embedding_dim=query.shape[3],
+                            value_embedding_dim=key.shape[3],
+                            duration=end_time - start_time)
     habana_profiler.record_counter(habana_profiler.get_timestamp_us(), {"TFLOPS": flops / 1e12})
 
     return attn_weights
