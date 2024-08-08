@@ -410,3 +410,6 @@ if __name__ == "__main__":
             raise ValueError("Tokenizer must be the same as the model for MII "
                              "backend.")
     main(args)
+
+    # make sure the process will be closed, workaround for deadlock
+    os._exit(0)
