@@ -79,8 +79,7 @@ QUANT_CONFIG=hqt/1x_70b_config_maxabs_hw_quant.json \
 ```bash
 PT_HPU_ENABLE_LAZY_COLLECTIVES=true \
   VLLM_DECODE_BS_BUCKET_MIN=1 \
-  VLLM_GRAPH_PROMPT_RATIO=0.6 \
-  VLLM_GRAPH_RESERVED_MEM=0.02 \
+  VLLM_GRAPH_RESERVED_MEM=0.2 \
   python benchmark_throughput.py \
     --model meta-llama/Llama-2-70b-chat-hf  \
     --device hpu \
@@ -98,9 +97,7 @@ QUANT_CONFIG=hqt/2x_70b_config_maxabs_hw_quant.json \
   EXPERIMENTAL_WEIGHT_SHARING=0 \
   PT_HPU_ENABLE_LAZY_COLLECTIVES=true \
   VLLM_DECODE_BS_BUCKET_MIN=1 \
-  VLLM_DECODE_BLOCK_BUCKET_MAX=1024 \
-  VLLM_GRAPH_PROMPT_RATIO=0.6 \
-  VLLM_GRAPH_RESERVED_MEM=0.02 \
+  VLLM_GRAPH_RESERVED_MEM=0.2 \
   python benchmark_throughput.py \
     --model meta-llama/Llama-2-70b-chat-hf  \
     --device hpu \
@@ -121,8 +118,6 @@ QUANT_CONFIG=hqt/2x_70b_config_maxabs_hw_quant.json \
 ```bash
 PT_HPU_ENABLE_LAZY_COLLECTIVES=true \
   VLLM_DECODE_BS_BUCKET_MIN=1 \
-  VLLM_GRAPH_PROMPT_RATIO=0.6 \
-  VLLM_GRAPH_RESERVED_MEM=0.02 \
   python benchmark_throughput.py \
     --model meta-llama/Llama-2-70b-chat-hf  \
     --device hpu \
@@ -140,8 +135,6 @@ QUANT_CONFIG=hqt/4x_70b_config_maxabs_hw_quant.json \
   EXPERIMENTAL_WEIGHT_SHARING=0 \
   PT_HPU_ENABLE_LAZY_COLLECTIVES=true \
   VLLM_DECODE_BS_BUCKET_MIN=1 \
-  VLLM_GRAPH_PROMPT_RATIO=0.6 \
-  VLLM_GRAPH_RESERVED_MEM=0.02 \
   python benchmark_throughput.py \
     --model meta-llama/Llama-2-70b-chat-hf  \
     --device hpu \
@@ -162,8 +155,6 @@ QUANT_CONFIG=hqt/4x_70b_config_maxabs_hw_quant.json \
 ```bash
 PT_HPU_ENABLE_LAZY_COLLECTIVES=true \
   VLLM_DECODE_BS_BUCKET_MIN=1 \
-  VLLM_GRAPH_PROMPT_RATIO=0.6 \
-  VLLM_GRAPH_RESERVED_MEM=0.02 \
   python benchmark_throughput.py \
     --model meta-llama/Llama-2-70b-chat-hf  \
     --device hpu \
@@ -181,8 +172,6 @@ QUANT_CONFIG=hqt/8x_70b_config_maxabs_hw_quant.json \
   EXPERIMENTAL_WEIGHT_SHARING=0 \
   PT_HPU_ENABLE_LAZY_COLLECTIVES=true \
   VLLM_DECODE_BS_BUCKET_MIN=1 \
-  VLLM_GRAPH_PROMPT_RATIO=0.6 \
-  VLLM_GRAPH_RESERVED_MEM=0.02 \
   python benchmark_throughput.py \
     --model meta-llama/Llama-2-70b-chat-hf  \
     --device hpu \
