@@ -26,7 +26,79 @@ from vllm.sequence import ExecuteModelRequest, SamplerOutput
 from vllm.usage.usage_lib import UsageContext
 
 logger = init_logger(__name__)
-ENGINE_ITERATION_TIMEOUT_S = envs.VLLM_ENGINE_ITERATION_TIMEOUT_S
+ ENGINE_ITERATION_TIMEOUT_S = envs.VLLM_ENGINE_ITERATION_TIMEOUT_S
+class HabanaProfile(object):
+    """
+    HPU profiler only could be run once, so HABANA_PROFILE_ENABLED, a class static variable shared by all the instances of HabanaProfile, is used to control which part will be captured.
+    """
+
+    HABANA_PROFILE_ENABLED = True
+
+    def __init__(
+        self,
+        warmup: int = 0,
+        active: int = 0,
+        record_shapes: bool = True,
+        output_dir: str = "./hpu_profile",
+        wait: int = 0,
+    ):
+        if active <= 0 or warmup < 0 or not HabanaProfile.HABANA_PROFILE_ENABLED:
+
+            def noop():
+                pass
+
+            self.start = noop
+            self.stop = noop
+            self.step = noop
+        else:
+            HabanaProfile.HABANA_PROFILE_ENABLED = False
+            schedule = torch.profiler.schedule(wait=wait, warmup=warmup, active=active, repeat=1)
+            activities = [torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.HPU]
+
+            profiler = torch.profiler.profile(
+                schedule=schedule,
+                activities=activities,
+                on_trace_ready=torch.profiler.tensorboard_trace_handler(output_dir),
+                record_shapes=record_shapes,
+                with_stack=False,
+            )
+            self.start = profiler.start
+            self.stop = profiler.stop
+            self.step = profiler.step
+            HabanaProfile.enable.invalid = True
+            HabanaProfile.disable.invalid = True
+
+    def stop(self):
+        self.stop()
+ 
+    def start(self):
+        self.start()
+
+    def step(self):
+        self.step()
+
+    @staticmethod
+    def disable():
+        """
+        Runs only once and must happen before doing profiling.
+        """
+        if hasattr(HabanaProfile.disable, "invalid"):
+            if not HabanaProfile.disable.invalid:
+                HabanaProfile.HABANA_PROFILE_ENABLED = False
+        else:
+            HabanaProfile.HABANA_PROFILE_ENABLED = False
+
+    @staticmethod
+    def enable():
+        """
+        Runs only once and must happen before doing profiling.
+        """
+        if hasattr(HabanaProfile.enable, "invalid"):
+            if not HabanaProfile.enable.invalid:
+                HabanaProfile.HABANA_PROFILE_ENABLED = True
+        else:
+            HabanaProfile.HABANA_PROFILE_ENABLED = True
+ 
 
 
 class AsyncEngineDeadError(RuntimeError):
@@ -614,6 +686,17 @@ class AsyncLLMEngine:
             pipeline_parallel_size = \
                 self.engine.parallel_config.pipeline_parallel_size
         has_requests_in_progress = [False] * pipeline_parallel_size
+        
+        WARMUP_STEP = 0
+        ACTIVE_STEP = 10
+        hb_profer = HabanaProfile(
+            warmup=0, active=ACTIVE_STEP, record_shapes=False
+        )
+        PROFILE=1
+        if PROFILE:
+            hb_profer.start()
+
+            step_count = 0
         while True:
             if not any(has_requests_in_progress):
                 logger.debug("Waiting for new requests...")
@@ -672,6 +755,11 @@ class AsyncLLMEngine:
                     "Engine iteration timed out. This should never happen!")
                 self.set_errored(exc)
                 raise
+            if PROFILE:
+                hb_profer.step()
+                step_count = step_count + 1
+                if step_count == ACTIVE_STEP + WARMUP_STEP:
+                    hb_profer.stop()
             await asyncio.sleep(0)
 
     async def add_request(

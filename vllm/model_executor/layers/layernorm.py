@@ -93,7 +93,7 @@ class RMSNorm(CustomOp):
             orig_shape = x.shape
             residual += x.view(residual.shape)
             # Note: HPUFusedRMSNorm requires 3D tensors as inputs
-            x = HPUFusedRMSNorm.apply(residual.float(), self.weight.float(),
+            x = HPUFusedRMSNorm.apply(residual, self.weight,
                                       self.variance_epsilon)
             return x.to(orig_dtype).view(orig_shape), residual
 
