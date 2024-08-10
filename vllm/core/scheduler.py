@@ -59,8 +59,11 @@ class SchedulingBudget:
     def can_schedule(self, *, num_new_tokens: int, num_new_seqs: int):
         assert num_new_tokens != 0
         assert num_new_seqs != 0
-        return (self.num_batched_tokens + num_new_tokens <= self.token_budget
+        re = (self.num_batched_tokens + num_new_tokens <= self.token_budget
                 and self.num_curr_seqs + num_new_seqs <= self.max_num_seqs)
+        #print("libin debug can_schedule ", re, self.num_batched_tokens , num_new_tokens, self.token_budget, \
+            #self.num_curr_seqs , num_new_seqs , self.max_num_seqs)
+        return re
 
     def remaining_token_budget(self):
         return self.token_budget - self.num_batched_tokens
