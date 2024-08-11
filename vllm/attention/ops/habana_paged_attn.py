@@ -75,9 +75,9 @@ class HabanaPagedAttention:
         alibi_slopes: Optional[torch.Tensor],
         k_scale: float,
         v_scale: float,
-        qk_matmul_op,
+        matmul_qk_op,
         softmax_op,
-        av_matmul_op,
+        matmul_av_op,
         k_cache_cls,
         v_cache_cls,
     ) -> torch.Tensor:
@@ -93,9 +93,9 @@ class HabanaPagedAttention:
             block_size,
             alibi_slopes,
             kv_cache_dtype,
-            qk_matmul_op,
+            matmul_qk_op,
             softmax_op,
-            av_matmul_op,
+            matmul_av_op,
             k_cache_cls,
             v_cache_cls,
         )

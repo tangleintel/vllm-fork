@@ -37,7 +37,7 @@ from vllm.model_executor.models.interfaces import (has_inner_state,
                                                    supports_vision)
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.platforms import current_platform
-from vllm.utils import is_tpu, is_hpu
+from vllm.utils import is_hpu, is_tpu
 
 logger = init_logger(__name__)
 
@@ -53,8 +53,8 @@ def _get_quantization_config(
             capability = capability[0] * 10 + capability[1]
             if capability < quant_config.get_min_capability():
                 raise ValueError(
-                    f"The quantization method {model_config.quantization} is not "
-                    "supported for the current GPU. "
+                    f"The quantization method {model_config.quantization} "
+                    "is not supported for the current GPU. "
                     f"Minimum capability: {quant_config.get_min_capability()}. "
                     f"Current capability: {capability}.")
         supported_dtypes = quant_config.get_supported_act_dtypes()

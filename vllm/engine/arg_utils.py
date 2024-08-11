@@ -229,12 +229,12 @@ class EngineArgs:
         parser.add_argument(
             '--kv-cache-dtype',
             type=str,
-            choices=['auto', 'fp8', 'fp8_e5m2', 'fp8_e4m3', 'hf8'],
+            choices=['auto', 'fp8', 'fp8_e5m2', 'fp8_e4m3', 'fp8_inc'],
             default=EngineArgs.kv_cache_dtype,
             help='Data type for kv cache storage. If "auto", will use model '
             'data type. CUDA 11.8+ supports fp8 (=fp8_e4m3) and fp8_e5m2. '
             'ROCm (AMD GPU) supports fp8 (=fp8_e4m3). '
-            'FP8_E4M3 is also supported on hpu (hf8).')
+            'Intel Gaudi (HPU) supports fp8 (using fp8_inc).')
         parser.add_argument(
             '--quantization-param-path',
             type=nullable_str,
@@ -842,7 +842,8 @@ class EngineArgs:
             self.model_loader_extra_config[
                 "qlora_adapter_name_or_path"] = self.qlora_adapter_name_or_path
 
-        device = device_config.device if self.weights_load_device is None else self.weights_load_device
+        device = device_config.device if self.weights_load_device is None else \
+                 self.weights_load_device
         load_config = LoadConfig(
             load_format=self.load_format,
             download_dir=self.download_dir,

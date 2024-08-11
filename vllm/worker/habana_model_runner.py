@@ -413,6 +413,9 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self._setup_buckets()
 
     def load_model(self) -> None:
+        import habana_frameworks.torch.core as htcore
+        if self.model_config.quantization == 'inc':
+            htcore.hpu_set_env()
         with HabanaMemoryProfiler() as m:
             with HabanaMemoryProfiler() as m_getmodel:
                 self.model = get_model(
@@ -429,18 +432,21 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                    f"took {m_getmodel.get_summary_string()}")
             logger.info(msg)
 
-            import habana_frameworks.torch.core as htcore
             if self.model_config.quantization == 'inc':
                 logger.info("Preparing model with INC..")
                 with HabanaMemoryProfiler() as m_inc:
-                    from neural_compressor.torch.quantization import FP8Config, convert, prepare
-                    config = FP8Config.from_json_file(os.getenv("QUANT_CONFIG", ""))
+                    from neural_compressor.torch.quantization import (
+                        FP8Config, convert, prepare)
+                    config = FP8Config.from_json_file(
+                        os.getenv("QUANT_CONFIG", ""))
                     if config.measure:
                         self.model = prepare(self.model, config)
                     elif config.quantize:
                         self.model = convert(self.model, config)
-                    htcore.hpu_initialize(self.model, mark_only_scales_as_const=True)
-                logger.info(f"Preparing model with INC took {m_inc.get_summary_string()}")
+                    htcore.hpu_initialize(self.model,
+                                          mark_only_scales_as_const=True)
+                logger.info("Preparing model with INC took %s",
+                            m_inc.get_summary_string())
             else:
                 self.model = self.model.to("hpu")
                 htcore.mark_step()
@@ -1425,7 +1431,10 @@ class HabanaModelRunner(
         if multi_modal_input is not None:
             execute_model_kwargs.update(multi_modal_input)
         if htorch.utils.internal.is_lazy():
-            execute_model_kwargs.update({"bypass_hpu_graphs":not use_graphs, "warmup_mode":warmup_mode})
+            execute_model_kwargs.update({
+                "bypass_hpu_graphs": not use_graphs,
+                "warmup_mode": warmup_mode
+            })
 
         htorch.core.mark_step()
         if self.is_driver_worker:
@@ -1439,8 +1448,8 @@ class HabanaModelRunner(
         with self.profiler.record_event('internal', model_event_name):
             hidden_states = self.model.forward(
                 **execute_model_kwargs,
-                selected_token_indices=sampling_metadata.
-                selected_token_indices)
+                selected_token_indices=sampling_metadata.selected_token_indices
+            )
 
         # Compute the logits.
         with self.profiler.record_event(
@@ -1485,12 +1494,13 @@ class HabanaModelRunner(
 
     def shutdown_inc(self):
         print('inc shutdown')
-        if model_config := getattr(self, "model_config", None):
-            if getattr(model_config, "quantization", None) == 'inc':
-                print('inc shutdown start')
-                from neural_compressor.torch.quantization import finalize_calibration
-                finalize_calibration(self.model.model)
-                print('inc shutdown')
+        if (model_config := getattr(self, "model_config", None)) and \
+                         getattr(model_config, "quantization", None) == 'inc':
+            print('inc shutdown start')
+            from neural_compressor.torch.quantization import (
+                finalize_calibration)
+            finalize_calibration(self.model.model)
+            print('inc shutdown')
 
     def __del__(self):
         self.shutdown_inc()

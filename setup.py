@@ -238,7 +238,7 @@ def _is_hpu() -> bool:
     is_hpu_available = True
     try:
         subprocess.run(["hl-smi"], capture_output=True, check=True)
-    except (FileNotFoundError, NotADirectoryError, PermissionError, subprocess.CalledProcessError):
+    except (FileNotFoundError, PermissionError, subprocess.CalledProcessError):
         if not os.path.exists('/dev/accel/accel0') and not os.path.exists(
                 '/dev/accel/accel_controlD0'):
             # last resort...
@@ -267,7 +267,7 @@ def _is_neuron() -> bool:
     torch_neuronx_installed = True
     try:
         subprocess.run(["neuron-ls"], capture_output=True, check=True)
-    except (FileNotFoundError, NotADirectoryError, PermissionError, subprocess.CalledProcessError):
+    except (FileNotFoundError, PermissionError, subprocess.CalledProcessError):
         torch_neuronx_installed = False
     return torch_neuronx_installed or VLLM_TARGET_DEVICE == "neuron"
 

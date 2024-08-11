@@ -118,9 +118,6 @@ class HabanaWorker(LocalOrDistributedWorkerBase):
         set_random_seed(self.model_config.seed)
 
     def load_model(self):
-        if self.model_config.quantization == 'inc':
-            import habana_frameworks.torch.core as htcore
-            htcore.hpu_set_env()
         self.model_runner.load_model()
 
     @torch.inference_mode()

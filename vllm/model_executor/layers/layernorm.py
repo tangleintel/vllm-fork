@@ -86,8 +86,7 @@ class RMSNorm(CustomOp):
                                       self.variance_epsilon)
             return x.view(orig_shape), residual
 
-        x = HPUFusedRMSNorm.apply(x, self.weight,
-                                  self.variance_epsilon)
+        x = HPUFusedRMSNorm.apply(x, self.weight, self.variance_epsilon)
         return x
 
     def forward_xpu(
