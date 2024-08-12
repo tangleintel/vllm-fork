@@ -1,4 +1,4 @@
-import asyncio
+import asyncio, torch
 import time
 from functools import partial
 from typing import (AsyncIterator, Callable, Dict, Iterable, List, Mapping,
@@ -26,7 +26,7 @@ from vllm.sequence import ExecuteModelRequest, SamplerOutput
 from vllm.usage.usage_lib import UsageContext
 
 logger = init_logger(__name__)
- ENGINE_ITERATION_TIMEOUT_S = envs.VLLM_ENGINE_ITERATION_TIMEOUT_S
+ENGINE_ITERATION_TIMEOUT_S = envs.VLLM_ENGINE_ITERATION_TIMEOUT_S
 class HabanaProfile(object):
     """
     HPU profiler only could be run once, so HABANA_PROFILE_ENABLED, a class static variable shared by all the instances of HabanaProfile, is used to control which part will be captured.
@@ -60,7 +60,7 @@ class HabanaProfile(object):
                 activities=activities,
                 on_trace_ready=torch.profiler.tensorboard_trace_handler(output_dir),
                 record_shapes=record_shapes,
-                with_stack=False,
+                with_stack=True,
             )
             self.start = profiler.start
             self.stop = profiler.stop
@@ -692,12 +692,13 @@ class AsyncLLMEngine:
         hb_profer = HabanaProfile(
             warmup=0, active=ACTIVE_STEP, record_shapes=False
         )
-        PROFILE=1
+        PROFILE=False
         if PROFILE:
-            hb_profer.start()
+            #hb_profer.start()
 
             step_count = 0
         while True:
+            #import pdb;pdb.set_trace()
             if not any(has_requests_in_progress):
                 logger.debug("Waiting for new requests...")
                 # Stop the execute model loop in parallel workers until there
@@ -756,10 +757,11 @@ class AsyncLLMEngine:
                 self.set_errored(exc)
                 raise
             if PROFILE:
-                hb_profer.step()
+                #hb_profer.step()
                 step_count = step_count + 1
                 if step_count == ACTIVE_STEP + WARMUP_STEP:
-                    hb_profer.stop()
+                    #hb_profer.stop()
+                    exit()
             await asyncio.sleep(0)
 
     async def add_request(
