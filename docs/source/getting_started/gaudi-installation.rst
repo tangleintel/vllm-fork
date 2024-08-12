@@ -176,7 +176,7 @@ In a dynamic inference serving scenario, there is a need to minimize the number 
 .. note::
    Bucketing allows us to reduce the number of required graphs significantly, but it does not handle any graph compilation and device code generation - this is done in warmup and HPUGraph capture phase.
 
-Whenever executing vLLM on HPU, the following log can be observed:
+When executing vLLM on HPU, the following log can be observed:
 
 .. code-block::
 
