@@ -312,16 +312,15 @@ Recommended vLLM Parameters
 Environment variables
 ------------
 
-vLLM for HPU supports following environment variables:
-
-Diagnostic knobs:
+Diagnostic and profiling knobs:
 
 -   ``VLLM_PROFILER_ENABLED``: if ``true``, high level profiler will be enabled. Resulting JSON traces can be viewed in `perfetto.habana.ai <https://perfetto.habana.ai/#!/viewer>`__. Disabled by default.
 -   ``VLLM_HPU_LOG_STEP_GRAPH_COMPILATION``: if ``true``, will log will log graph compilations per each vLLM engine step, only when there was any - highly recommended to use alongside ``PT_HPU_METRICS_GC_DETAILS``. Disabled by default.
 -   ``VLLM_HPU_LOG_STEP_GRAPH_COMPILATION_ALL``: if ``true``, will log graph compilations per each vLLM engine step, always, even if there were none. Disabled by default.
 -   ``VLLM_HPU_LOG_STEP_CPU_FALLBACKS``: if ``true``, will log cpu fallbacks per each vLLM engine step, only when there was any. Disabled by default.
 -   ``VLLM_HPU_LOG_STEP_CPU_FALLBACKS_ALL``: if ``true``, will log cpu fallbacks per each vLLM engine step, always, even if there were none. Disabled by default.
-Performance knobs:
+
+Performance tuning knobs:
 
 -   ``VLLM_SKIP_WARMUP``: if ``true``, warmup will be skipped, ``false`` by default
 -   ``VLLM_GRAPH_RESERVED_MEM``: percentage of memory dedicated for HPUGraph capture 
@@ -333,7 +332,7 @@ Performance knobs:
     - ``{dim}`` is either ``BS`` or ``SEQ``
     - ``{param}`` is either ``MIN``, ``STEP`` or ``MAX``
     - Default values:
-      
+
       - Prompt:
          - batch size min (``VLLM_PROMPT_BS_BUCKET_MIN``): ``1``
          - batch size step (``VLLM_PROMPT_BS_BUCKET_STEP``): ``32``
@@ -341,7 +340,7 @@ Performance knobs:
          - sequence length min (``VLLM_PROMPT_SEQ_BUCKET_MIN``): ``block_size``
          - sequence length step (``VLLM_PROMPT_SEQ_BUCKET_STEP``): ``block_size``
          - sequence length max (``VLLM_PROMPT_SEQ_BUCKET_MAX``): ``1024``
-      
+
       - Decode:
          - batch size min (``VLLM_DECODE_BS_BUCKET_MIN``): ``1``
          - batch size step (``VLLM_DECODE_BS_BUCKET_STEP``): ``128``
