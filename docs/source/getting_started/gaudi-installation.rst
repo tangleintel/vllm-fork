@@ -18,7 +18,7 @@ Requirements
 -  OS: Ubuntu 22.04 LTS
 -  Python: 3.10
 -  Intel Gaudi accelerator
--  Intel Gaudi software version 1.16.0 or newer
+-  Intel Gaudi software version 1.17.0
 
 To verify that the Intel Gaudi software was correctly installed, run:
 
@@ -44,8 +44,8 @@ Use the following commands to run a Docker image:
 
 .. code:: console
 
-   $ docker pull vault.habana.ai/gaudi-docker/1.16.2/ubuntu22.04/habanalabs/pytorch-installer-2.2.2:latest
-   $ docker run -it --runtime=habana -e HABANA_VISIBLE_DEVICES=all -e OMPI_MCA_btl_vader_single_copy_mechanism=none --cap-add=sys_nice --net=host --ipc=host vault.habana.ai/gaudi-docker/1.16.2/ubuntu22.04/habanalabs/pytorch-installer-2.2.2:latest
+   $ docker pull vault.habana.ai/gaudi-docker/1.17.0/ubuntu22.04/habanalabs/pytorch-installer-2.3.1:latest
+   $ docker run -it --runtime=habana -e HABANA_VISIBLE_DEVICES=all -e OMPI_MCA_btl_vader_single_copy_mechanism=none --cap-add=sys_nice --net=host --ipc=host vault.habana.ai/gaudi-docker/1.17.0/ubuntu22.04/habanalabs/pytorch-installer-2.3.1:latest
 
 Build and Install vLLM
 ---------------------------
