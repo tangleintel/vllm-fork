@@ -312,7 +312,7 @@ Recommended vLLM Parameters
 Environment variables
 ------------
 
-Diagnostic and profiling knobs:
+**Diagnostic and profiling knobs:**
 
 -   ``VLLM_PROFILER_ENABLED``: if ``true``, high level profiler will be enabled. Resulting JSON traces can be viewed in `perfetto.habana.ai <https://perfetto.habana.ai/#!/viewer>`__. Disabled by default.
 -   ``VLLM_HPU_LOG_STEP_GRAPH_COMPILATION``: if ``true``, will log will log graph compilations per each vLLM engine step, only when there was any - highly recommended to use alongside ``PT_HPU_METRICS_GC_DETAILS``. Disabled by default.
@@ -320,7 +320,7 @@ Diagnostic and profiling knobs:
 -   ``VLLM_HPU_LOG_STEP_CPU_FALLBACKS``: if ``true``, will log cpu fallbacks per each vLLM engine step, only when there was any. Disabled by default.
 -   ``VLLM_HPU_LOG_STEP_CPU_FALLBACKS_ALL``: if ``true``, will log cpu fallbacks per each vLLM engine step, always, even if there were none. Disabled by default.
 
-Performance tuning knobs:
+**Performance tuning knobs:**
 
 -   ``VLLM_SKIP_WARMUP``: if ``true``, warmup will be skipped, ``false`` by default
 -   ``VLLM_GRAPH_RESERVED_MEM``: percentage of memory dedicated for HPUGraph capture 
