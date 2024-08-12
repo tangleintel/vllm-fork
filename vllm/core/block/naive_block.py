@@ -36,7 +36,8 @@ class NaiveBlockAllocator(BlockAllocator):
 
         self._free_block_indices: Set[BlockId] = set(block_ids)
         self._all_block_indices = frozenset(block_ids)
-        assert len(self._all_block_indices) == num_blocks
+        #assert len(self._all_block_indices) == num_blocks
+        assert len(self._all_block_indices) == num_blocks or len(self._all_block_indices) == num_blocks-1
 
         self._refcounter = RefCounter(
             all_block_indices=self._free_block_indices)

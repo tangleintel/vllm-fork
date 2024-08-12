@@ -100,6 +100,9 @@ def run_vllm(
         download_dir=download_dir,
         enable_chunked_prefill=enable_chunked_prefill,
         max_num_batched_tokens=max_num_batched_tokens,
+        num_lookahead_slots=1,
+		use_v2_block_manager=True,
+		enable_delayed_sampling=True,
     )
 
     # Add the requests to the engine.
@@ -110,7 +113,7 @@ def run_vllm(
         sampling_params.append(
             SamplingParams(
                 n=n,
-                temperature=0.0 if use_beam_search else 1.0,
+                temperature=1.0,#  0.0 if use_beam_search else 1.0,
                 top_p=1.0,
                 use_beam_search=use_beam_search,
                 ignore_eos=True,
@@ -118,7 +121,9 @@ def run_vllm(
             ))
 
     start = time.perf_counter()
-    llm.generate(prompts, sampling_params, use_tqdm=True)
+    x = llm.generate(prompts, sampling_params, use_tqdm=True)
+    for idx, item in enumerate(x):
+        print(idx, item.prompt, ' --> ', item.outputs[0].text)
     end = time.perf_counter()
     return end - start
 
@@ -208,9 +213,13 @@ def main(args: argparse.Namespace):
     # Sample the requests.
     tokenizer = AutoTokenizer.from_pretrained(
         args.tokenizer, trust_remote_code=args.trust_remote_code)
+    text = '''A Farmer had just sown a field of wheat, and was keeping a careful watch over it, for numbers of Rooks and starlings kept continually settling on it and eating up the grain. Along with him went his Boy, carrying a sling: and whenever the Farmer asked for the sling the starlings understood what he said and warned the Rooks and they were off in a moment. So the Farmer hit on a trick. "My lad," said he, "we must get the better of these birds somehow. After this, when I want the sling, I won't say 'sling,' but just 'humph!' and you must then hand me the sling quickly." Presently back came the whole flock. "Humph!" said the Farmer; but the starlings took no notice, and he had time to sling several stones among them, hitting one on the head, another in the legs, and another in the wing, before they got out of range. As they made all haste away they met some cranes, who asked them what the matter was. "Matter?" said one of the Rooks; "it's those rascals, men, that are the matter. Don't you go near them."'''
+    tokenized = tokenizer(text)
+    assert len(tokenized['input_ids']) == 250
     if args.dataset is None:
         # Synthesize a prompt with the given input length.
-        prompt = "hi" * (args.input_len - 1)
+        #prompt = "hi" * (args.input_len - 1)
+        prompt = text
         requests = [(prompt, args.input_len, args.output_len)
                     for _ in range(args.num_prompts)]
     else:

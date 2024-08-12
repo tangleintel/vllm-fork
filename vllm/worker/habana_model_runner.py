@@ -1030,11 +1030,11 @@ class HabanaModelRunner:
             if not is_prompt:
                 htorch.core.mark_step()
                 # Only after dispatching next model.forward() read and update the previous token ids to return
-                sampled_token_ids = output.sampled_token_ids.tolist()
-                for seq_group_output in output.outputs[:real_batch_size]:
-                    for sample in seq_group_output.samples:
-                        sample.output_token = sampled_token_ids[sample.output_token][0]
-                output = output
+                #sampled_token_ids = output.sampled_token_ids.tolist()
+                #for seq_group_output in output.outputs[:real_batch_size]:
+                #    for sample in seq_group_output.samples:
+                #        sample.output_token = sampled_token_ids[sample.output_token][0]
+                #output = output
             else:
                 # For prompts compose empty output
                 from vllm.sequence import (Logprob, SamplerOutput, SequenceGroupOutput, SequenceOutput)
