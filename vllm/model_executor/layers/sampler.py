@@ -51,6 +51,7 @@ class Sampler(nn.Module):
         # containing the sampled token ids and probabilities. This is used by
         # speculative decoding.
         self.include_gpu_probs_tensor = False
+        self.sample_token_positions_only = False
 
     def _init_sampling_tensors(
         self,
@@ -142,6 +143,7 @@ class Sampler(nn.Module):
             sampling_tensors,
             include_gpu_probs_tensor=self.include_gpu_probs_tensor,
             modify_greedy_probs=self._should_modify_greedy_probs_inplace,
+            token_positions_only=self.sample_token_positions_only,
         )
 
         if self.include_gpu_probs_tensor:
@@ -320,6 +322,7 @@ def _apply_min_p(
 def _greedy_sample(
     selected_seq_groups: List[SequenceGroupToSample],
     samples: torch.Tensor,
+    token_positions_only: bool = False,
 ) -> SampleResultType:
     """Run greedy sampling on a given samples.
 
@@ -333,7 +336,8 @@ def _greedy_sample(
         same as the length of selected_seq_groups. If the corresponding
         seq_group has do_sample=False, tuple contains ([], [])
     """
-    samples_lst = samples.tolist()
+    if not token_positions_only:
+        samples_lst = samples.tolist()
     sample_idx = 0
     results: SampleResultType = []
     for seq_group in selected_seq_groups:
@@ -346,7 +350,7 @@ def _greedy_sample(
         assert num_parent_seqs == 1, (
             "Greedy sampling should have only one seq.")
         parent_ids = list(range(num_parent_seqs))
-        next_token_ids = [samples_lst[sample_idx]]
+        next_token_ids = [sample_idx if token_positions_only else samples[sample_idx]]
         results.append((next_token_ids, parent_ids))
         sample_idx += num_parent_seqs
     return results
@@ -355,6 +359,7 @@ def _greedy_sample(
 def _random_sample(
     selected_seq_groups: List[SequenceGroupToSample],
     random_samples: torch.Tensor,
+    token_positions_only: bool = False,
 ) -> SampleResultType:
     """Run random sampling on a given samples.
 
@@ -385,12 +390,16 @@ def _random_sample(
             # Prompt phase.
             parent_ids = [0] * sampling_params.best_of
             next_token_ids = random_samples[
-                sample_idx, :sampling_params.best_of].tolist()
+                sample_idx, :sampling_params.best_of]
+            if not token_positions_only:
+                next_token_ids = next_token_ids.tolist()
         else:
             # Generation phase.
             parent_ids = list(range(num_parent_seqs))
-            next_token_ids = random_samples[sample_idx:sample_idx +
-                                            num_parent_seqs, 0].tolist()
+            next_token_ids = random_samples[
+                sample_idx, :sampling_params.best_of]
+            if not token_positions_only:
+                next_token_ids = next_token_ids.tolist()
         results.append((next_token_ids, parent_ids))
         sample_idx += num_parent_seqs
     return results
@@ -503,6 +512,7 @@ def _sample_with_torch(
     sampling_metadata: SamplingMetadata,
     include_gpu_probs_tensor: bool,
     modify_greedy_probs: bool,
+    token_positions_only: bool = False,
 ) -> Tuple[SampleResultType, Optional[torch.Tensor]]:
     categorized_seq_group_ids: Dict[SamplingType,
                                     List[int]] = {t: []
@@ -589,11 +599,11 @@ def _sample_with_torch(
                 continue
             (seq_group_id, seq_groups) = sample_metadata[sampling_type]
             if sampling_type == SamplingType.GREEDY:
-                sample_results = _greedy_sample(seq_groups, greedy_samples)
+                sample_results = _greedy_sample(seq_groups, greedy_samples, token_positions_only)
             elif sampling_type in (SamplingType.RANDOM,
                                    SamplingType.RANDOM_SEED):
                 sample_results = _random_sample(
-                    seq_groups, multinomial_samples[sampling_type])
+                    seq_groups, multinomial_samples[sampling_type],token_positions_only)
             elif sampling_type == SamplingType.BEAM:
                 sample_results = _beam_search_sample(seq_groups,
                                                      beam_search_logprobs)
@@ -694,7 +704,7 @@ def _sample_with_triton_kernel(
 def _sample(
     probs: torch.Tensor, logprobs: torch.Tensor,
     sampling_metadata: SamplingMetadata, sampling_tensors: SamplingTensors,
-    include_gpu_probs_tensor: bool, modify_greedy_probs: bool
+    include_gpu_probs_tensor: bool, modify_greedy_probs: bool, token_positions_only: bool
 ) -> Tuple[SampleResultType, Optional[torch.Tensor]]:
     """
     Args:
@@ -713,7 +723,7 @@ def _sample(
         logprobs,
         sampling_metadata,
         include_gpu_probs_tensor=include_gpu_probs_tensor,
-        modify_greedy_probs=modify_greedy_probs,
+        modify_greedy_probs=modify_greedy_probs,token_positions_only=token_positions_only,
     )
 
     # TODO: Enable once Triton kernel & associated code is faster.
