@@ -314,8 +314,16 @@ Environment variables
 
 vLLM for HPU supports following environment variables:
 
+Diagnostic knobs:
+
+-   ``VLLM_PROFILER_ENABLED``: if ``true``, high level profiler will be enabled. Resulting JSON traces can be viewed in `perfetto.habana.ai <https://perfetto.habana.ai/#!/viewer>`__. Disabled by default.
+-   ``VLLM_HPU_LOG_STEP_GRAPH_COMPILATION``: if ``true``, will log will log graph compilations per each vLLM engine step, only when there was any - highly recommended to use alongside ``PT_HPU_METRICS_GC_DETAILS``. Disabled by default.
+-   ``VLLM_HPU_LOG_STEP_GRAPH_COMPILATION_ALL``: if ``true``, will log graph compilations per each vLLM engine step, always, even if there were none. Disabled by default.
+-   ``VLLM_HPU_LOG_STEP_CPU_FALLBACKS``: if ``true``, will log cpu fallbacks per each vLLM engine step, only when there was any. Disabled by default.
+-   ``VLLM_HPU_LOG_STEP_CPU_FALLBACKS_ALL``: if ``true``, will log cpu fallbacks per each vLLM engine step, always, even if there were none. Disabled by default.
+Performance knobs:
+
 -   ``VLLM_SKIP_WARMUP``: if ``true``, warmup will be skipped, ``false`` by default
--   ``VLLM_PROFILED_ENABLED``: if ``true``, high level profiler will be enabled, ``false``. Resulting JSON traces can be viewed in `perfetto.habana.ai <https://perfetto.habana.ai/#!/viewer>`__
 -   ``VLLM_GRAPH_RESERVED_MEM``: percentage of memory dedicated for HPUGraph capture 
 -   ``VLLM_GRAPH_PROMPT_RATIO``: percentage of reserved graph memory dedicated for prompt graphs, ``0.5`` by default
 -   ``VLLM_GRAPH_DECODE_STRATEGY``: strategy determining order of decode graph capture, ``min_tokens`` or ``max_bs``, ``max_bs`` by default
