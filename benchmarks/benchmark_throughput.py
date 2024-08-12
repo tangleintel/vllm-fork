@@ -106,6 +106,9 @@ def run_vllm(
         max_num_batched_tokens=max_num_batched_tokens,
         distributed_executor_backend=distributed_executor_backend,
         load_format=load_format,
+        num_lookahead_slots=1,
+		use_v2_block_manager=True,
+		enable_delayed_sampling=True,
     )
 
     # Add the requests to the engine.
@@ -116,7 +119,7 @@ def run_vllm(
         sampling_params.append(
             SamplingParams(
                 n=n,
-                temperature=0.0 if use_beam_search else 1.0,
+                temperature=1.0 if use_beam_search else 1.0,
                 top_p=1.0,
                 use_beam_search=use_beam_search,
                 ignore_eos=True,

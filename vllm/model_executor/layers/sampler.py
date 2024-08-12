@@ -133,18 +133,23 @@ class Sampler(nn.Module):
         # Compute the probabilities.
         probs = torch.softmax(logits, dim=-1, dtype=torch.float)
         # Compute the log probabilities.
-        logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float)
+        #logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float)
 
         # Sample the next tokens.
-        sample_results, maybe_sampled_tokens_tensor = _sample(
-            probs,
-            logprobs,
-            sampling_metadata,
-            sampling_tensors,
-            include_gpu_probs_tensor=self.include_gpu_probs_tensor,
-            modify_greedy_probs=self._should_modify_greedy_probs_inplace,
-            token_positions_only=self.sample_token_positions_only,
-        )
+        #sample_results, maybe_sampled_tokens_tensor = _sample(
+        #    probs,
+        #    logprobs,
+        #    sampling_metadata,
+        #    sampling_tensors,
+        #    include_gpu_probs_tensor=self.include_gpu_probs_tensor,
+        #    modify_greedy_probs=self._should_modify_greedy_probs_inplace,
+        #    token_positions_only=self.sample_token_positions_only,
+        #)
+        logprobs = None
+        next_tokens = torch.multinomial(probs, num_samples=1).squeeze(1)
+        next_tokens_list = next_tokens.tolist()
+        sample_results = [([i],[0]) for i in next_tokens_list]
+        maybe_sampled_tokens_tensor = torch.tensor([[i] for i in next_tokens_list], device=logits.device)
 
         if self.include_gpu_probs_tensor:
             assert maybe_sampled_tokens_tensor is not None
