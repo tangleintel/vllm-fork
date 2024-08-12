@@ -431,6 +431,7 @@ class CacheConfig:
         cache_dtype: Data type for kv cache storage.
         num_gpu_blocks_override: Number of GPU blocks to use. This overrides the
             profiled num_gpu_blocks if specified. Does nothing if None.
+        split_qk_v: Whether to split qk and v calculations.
     """
 
     def __init__(
@@ -443,6 +444,7 @@ class CacheConfig:
         sliding_window: Optional[int] = None,
         enable_prefix_caching: bool = False,
         cpu_offload_gb: float = 0,
+        split_qk_v: bool = False,
     ) -> None:
         self.block_size = block_size
         self.gpu_memory_utilization = gpu_memory_utilization
@@ -452,6 +454,7 @@ class CacheConfig:
         self.sliding_window = sliding_window
         self.enable_prefix_caching = enable_prefix_caching
         self.cpu_offload_gb = cpu_offload_gb
+        self.split_qk_v = split_qk_v
         self._verify_args()
         self._verify_cache_dtype()
         self._verify_prefix_caching()
@@ -474,12 +477,13 @@ class CacheConfig:
     def _verify_cache_dtype(self) -> None:
         if self.cache_dtype == "auto":
             pass
-        elif self.cache_dtype in ("fp8", "fp8_e4m3", "fp8_e5m2"):
+        elif self.cache_dtype in ("fp8", "fp8_e4m3", "fp8_e5m2", "hf8"):
             logger.info(
                 "Using fp8 data type to store kv cache. It reduces the GPU "
                 "memory footprint and boosts the performance. "
                 "Meanwhile, it may cause accuracy drop without a proper "
-                "scaling factor")
+                "scaling factor. "
+                "FP8_E4M3 is also supported on hpu (hf8).")
         else:
             raise ValueError(f"Unknown kv cache dtype: {self.cache_dtype}")
 
@@ -600,11 +604,12 @@ class LoadConfig:
         ignore_patterns: The list of patterns to ignore when loading the model.
             Default to "original/**/*" to avoid repeated loading of llama's 
             checkpoints.
-            
+        device: Device on which weights are loaded.
     """
 
     load_format: Union[str, LoadFormat, "BaseModelLoader"] = LoadFormat.AUTO
     download_dir: Optional[str] = None
+    device: Optional[str] = None
     model_loader_extra_config: Optional[Union[str, dict]] = field(
         default_factory=dict)
     ignore_patterns: Optional[Union[List[str], str]] = None

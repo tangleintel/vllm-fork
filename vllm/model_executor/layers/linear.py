@@ -273,6 +273,7 @@ class ColumnParallelLinear(LinearBase):
                          quant_config, prefix)
 
         self.gather_output = gather_output
+        self.collective_func = tensor_model_parallel_all_gather
 
         # Divide the weight matrix along the last dimension.
         tp_size = get_tensor_model_parallel_world_size()
@@ -334,7 +335,7 @@ class ColumnParallelLinear(LinearBase):
         output_parallel = self.quant_method.apply(self, input_, bias)
         if self.gather_output:
             # All-gather across the partitions.
-            output = tensor_model_parallel_all_gather(output_parallel)
+            output = self.collective_func(output_parallel)
         else:
             output = output_parallel
         output_bias = self.bias if self.skip_bias_add else None
@@ -524,7 +525,8 @@ class QKVParallelLinear(ColumnParallelLinear):
                  skip_bias_add: bool = False,
                  params_dtype: Optional[torch.dtype] = None,
                  quant_config: Optional[QuantizationConfig] = None,
-                 prefix: str = ""):
+                 prefix: str = "",
+                 split_qk_v: bool = False):
         self.hidden_size = hidden_size
         self.head_size = head_size
         self.total_num_heads = total_num_heads
@@ -541,14 +543,23 @@ class QKVParallelLinear(ColumnParallelLinear):
         else:
             self.num_kv_heads = divide(self.total_num_kv_heads, tp_size)
             self.num_kv_head_replicas = 1
+        self.split_qk_v = split_qk_v
         input_size = self.hidden_size
-        output_size = (self.num_heads +
-                       2 * self.num_kv_heads) * tp_size * self.head_size
-        self.output_sizes = [
-            self.num_heads * self.head_size * tp_size,  # q_proj
-            self.num_kv_heads * self.head_size * tp_size,  # k_proj
-            self.num_kv_heads * self.head_size * tp_size,  # v_proj 
-        ]
+        if (split_qk_v):
+            output_size = (self.num_heads + self.num_kv_heads) * tp_size * self.head_size
+            self.output_sizes = [
+                self.num_heads * self.head_size * tp_size,  # q_proj
+                self.num_kv_heads * self.head_size * tp_size,  # k_proj
+            ]
+        else:
+            output_size = (self.num_heads +
+                        2 * self.num_kv_heads) * tp_size * self.head_size
+            self.output_sizes = [
+                self.num_heads * self.head_size * tp_size,  # q_proj
+                self.num_kv_heads * self.head_size * tp_size,  # k_proj
+                self.num_kv_heads * self.head_size * tp_size,  # v_proj 
+            ]
+        
 
         super().__init__(input_size=input_size,
                          output_size=output_size,
@@ -558,6 +569,16 @@ class QKVParallelLinear(ColumnParallelLinear):
                          params_dtype=params_dtype,
                          quant_config=quant_config,
                          prefix=prefix)
+        
+        if (self.split_qk_v):
+            self.v_proj = ColumnParallelLinear(input_size=input_size,
+                                               output_size=self.num_kv_heads * tp_size * self.head_size,
+                                               bias=bias,
+                                               gather_output=False,
+                                               skip_bias_add=skip_bias_add,
+                                               params_dtype=params_dtype,
+                                               quant_config=quant_config,
+                                               prefix=prefix)
 
     def weight_loader(self,
                       param: Parameter,
@@ -639,14 +660,15 @@ class QKVParallelLinear(ColumnParallelLinear):
                 orig_qkv_offsets = {
                     "q": (0, self.num_heads * self.head_size),
                     "k": (self.num_heads * self.head_size,
-                          self.num_kv_heads * self.head_size),
-                    "v":
-                    ((self.num_heads + self.num_kv_heads) * self.head_size,
-                     self.num_kv_heads * self.head_size),
-                    "total":
-                    ((self.num_heads + 2 * self.num_kv_heads) * self.head_size,
-                     0)
+                        self.num_kv_heads * self.head_size),
                 }
+                if (self.split_qk_v):
+                    orig_qkv_offsets["total"] = ((self.num_heads + self.num_kv_heads) * self.head_size, 0)
+                else:
+                    orig_qkv_offsets["v"] = ((self.num_heads + self.num_kv_heads) * self.head_size,
+                                              self.num_kv_heads * self.head_size)
+                    orig_qkv_offsets["total"] = ((self.num_heads + 2 * self.num_kv_heads) * self.head_size, 0)
+
                 shard_size, shard_offset = adjust_bitsandbytes_shard(
                     param, orig_qkv_offsets, loaded_shard_id)
 
@@ -680,6 +702,13 @@ class QKVParallelLinear(ColumnParallelLinear):
 
         assert param_data.shape == loaded_weight.shape
         param_data.copy_(loaded_weight)
+
+    def forward(self, input_):
+        output, output_bias = super().forward(input_)
+        if not self.split_qk_v:
+            return output, output_bias
+        v, _ = self.v_proj.forward(input_)
+        return output, v, output_bias
 
 
 class RowParallelLinear(LinearBase):
@@ -723,6 +752,7 @@ class RowParallelLinear(LinearBase):
 
         self.input_is_parallel = input_is_parallel
         self.reduce_results = reduce_results
+        self.collective_func = tensor_model_parallel_all_reduce
 
         # Divide the weight matrix along the last dimension.
         self.tp_rank = get_tensor_model_parallel_rank()
@@ -770,7 +800,7 @@ class RowParallelLinear(LinearBase):
         assert param_data.shape == loaded_weight.shape
         param_data.copy_(loaded_weight)
 
-    def forward(self, input_):
+    def resolve_input(self, input_):
         if self.input_is_parallel:
             input_parallel = input_
         else:
@@ -778,6 +808,10 @@ class RowParallelLinear(LinearBase):
             splitted_input = split_tensor_along_last_dim(
                 input_, num_partitions=self.tp_size)
             input_parallel = splitted_input[tp_rank].contiguous()
+        return input_parallel
+
+    def forward(self, input_):
+        input_parallel = self.resolve_input(input_)
 
         # Matrix multiply.
         assert self.quant_method is not None

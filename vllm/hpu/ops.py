@@ -23,62 +23,72 @@ def silu_and_mul(output, input):
     output.copy_(silu(x) * y)
 
 
-def fetch_from_cache(cache, blocks, permutations):
-    return [
-        cache.index_select(0, blocks[:, i]).permute(permutations)
-        for i in range(blocks.size(1))
-    ]
+def gelu_new(output, input):
+    raise NotImplementedError
 
 
-@hpu_utils.with_mark_steps
-def paged_attention_v1(query,
-                       key_cache,
-                       value_cache,
-                       head_mapping,
-                       scale,
-                       block_tables,
-                       context_lens,
-                       block_size,
-                       alibi_slopes=None,
-                       kv_cache_dtype=None) -> None:
-    seq_len = block_tables.size(1)
-    batch_size, query_heads, _ = query.shape
-    _, _, kv_heads, _ = key_cache.shape
-    min_inf = torch.finfo(query.dtype).min
-    mask = (torch.arange(0,
-                         seq_len * block_size,
-                         dtype=torch.int32,
-                         device=key_cache.device).view(1, -1).expand(
-                             batch_size, -1).ge(context_lens.view(-1, 1)).view(
-                                 batch_size, 1, 1, -1))
-    query.mul_(scale)
-    query = query.unsqueeze(-2)
-    keys = fetch_from_cache(key_cache, block_tables, (0, 2, 3, 1))
-    if query_heads != kv_heads:
+def gelu_fast(output, input):
+    raise NotImplementedError
+
+
+def batch2block(tensor, block_mapping):
+    shape = tuple(tensor.shape)
+    return (block_mapping @ tensor.view(shape[0], -1)).view(-1, *shape[1:])
+
+
+def block2batch(tensor, block_mapping):
+    shape = tuple(tensor.shape)
+    return (block_mapping.t() @ tensor.view(shape[0], -1)).view(-1, *shape[1:])
+
+
+def block_softmax(batch_size, attn, block_mapping):
+    attn.sub_(10.0)
+    attn = attn.exp_()
+    sums = attn.sum(dim=-1).unsqueeze(-1)
+    sums = block2batch(sums, block_mapping)
+    sums = batch2block(sums, block_mapping)
+    sums.add_(1.0e-12)
+    attn.div_(sums)
+    return attn
+
+
+def flat_pa(query,
+            key_cache,
+            value_cache,
+            block_list,
+            block_mapping,
+            block_bias,
+            scale,
+            qk_matmul_op,
+            av_matmul_op,
+            keys_fetch_func,
+            values_fetch_func):
+    batch_size = query.size(0)
+    q_heads = query.size(1)
+    kv_heads = key_cache.size(2)
+
+    query = batch2block(scale * query, block_mapping).unsqueeze(-2)
+    key = keys_fetch_func(key_cache, block_list).transpose(1, 2)
+    value = values_fetch_func(value_cache, block_list).transpose(1, 2)
+    block_bias = block_bias.view(key.size(0), 1, 1, -1)
+
+    if kv_heads != q_heads:
+        block_bias = block_bias.unsqueeze(1)
         query = query.unflatten(1, (kv_heads, -1))
-        keys = [k.unflatten(1, (kv_heads, 1)) for k in keys]
-        mask = mask.unsqueeze(2)
-
-    attn_weights = [torch.matmul(query, k) for k in keys]
-    attn_weights = torch.cat(attn_weights, dim=-1)
-    if alibi_slopes is not None:
-        attn_weights.add_(alibi_slopes[:, :, -attn_weights.size(2):,
-                                       -attn_weights.size(3):])
-    attn_weights = (attn_weights.masked_fill(mask, min_inf).softmax(dim=-1))
-
-    values = fetch_from_cache(value_cache, block_tables, (0, 2, 1, 3))
-    if PA_SPLIT_VALUE:
-        attn_weights = attn_weights.split(block_size, dim=-1)
+        key = key.unflatten(1, (kv_heads, 1))
+        value = value.unflatten(1, (kv_heads, 1))
+        key = key.transpose(3, 4)
     else:
-        values = [torch.cat(values, dim=-2)]
-        attn_weights = [attn_weights]
-    if query_heads != kv_heads:
-        values = [v.unflatten(1, (kv_heads, 1)) for v in values]
-    attn_weights = [torch.matmul(a, v) for a, v in zip(attn_weights, values)]
-    if query_heads != kv_heads:
-        attn_weights = [a.flatten(1, 2) for a in attn_weights]
-    attn_weights = sum(attn_weights)
-    return attn_weights.squeeze(-2)
+        key = key.transpose(2, 3)
+
+    attn = qk_matmul_op(query, key) + block_bias
+    attn = block_softmax(batch_size, attn, block_mapping)
+    attn = av_matmul_op(attn, value)
+    attn = block2batch(attn, block_mapping)
+    attn = attn.squeeze(-2)
+    if kv_heads != q_heads:
+        attn = attn.flatten(1, 2)
+    return attn
 
 
 def silu_and_mul_wrapper(x: torch.Tensor) -> torch.Tensor:
@@ -123,7 +133,6 @@ def static_fused_moe(hidden_states, w1, w2, score, topk):
     return final_hidden_states.view(-1, D)
 
 
-@hpu_utils.with_mark_steps
 def prompt_attention(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -131,6 +140,9 @@ def prompt_attention(
     attn_bias: Optional[torch.Tensor] = None,
     p: float = 0.0,
     scale: Optional[float] = None,
+    qk_matmul_op = torch.matmul,
+    softmax_op = torch.softmax,
+    av_matmul_op = torch.matmul,
 ) -> torch.Tensor:
     query = query.transpose(1, 2)
     key = key.transpose(1, 2)
@@ -142,11 +154,11 @@ def prompt_attention(
         key = key.unflatten(1, (kv_heads, 1))
         value = value.unflatten(1, (kv_heads, 1))
         attn_bias = attn_bias.unsqueeze(2)
-    attn_weights = torch.matmul(query * scale, key.transpose(-1, -2))
+    attn_weights = qk_matmul_op(query * scale, key.transpose(-1, -2))
     if attn_bias is not None:
         attn_weights.add_(attn_bias)
-    attn_weights = torch.softmax(attn_weights, dim=-1)
-    attn_weights = torch.matmul(attn_weights, value)
+    attn_weights = softmax_op(attn_weights, dim=-1)
+    attn_weights = av_matmul_op(attn_weights, value)
     if query_heads != kv_heads:
         attn_weights = attn_weights.flatten(1, 2)
     attn_weights = attn_weights.transpose(1, 2)

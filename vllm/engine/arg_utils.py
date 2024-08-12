@@ -38,6 +38,7 @@ class EngineArgs:
     trust_remote_code: bool = False
     download_dir: Optional[str] = None
     load_format: str = 'auto'
+    weights_load_device: Optional[str] = None
     dtype: str = 'auto'
     kv_cache_dtype: str = 'auto'
     quantization_param_path: Optional[str] = None
@@ -61,6 +62,7 @@ class EngineArgs:
     swap_space: int = 4  # GiB
     cpu_offload_gb: int = 0  # GiB
     gpu_memory_utilization: float = 0.90
+    split_qk_v: bool = False
     max_num_batched_tokens: Optional[int] = None
     max_num_seqs: int = 256
     max_logprobs: int = 20  # Default value for OpenAI Chat Completions API
@@ -206,6 +208,11 @@ class EngineArgs:
             'section for more information.\n'
             '* "bitsandbytes" will load the weights using bitsandbytes '
             'quantization.\n')
+        parser.add_argument("--weights-load-device",
+                            type=str,
+                            default=EngineArgs.weights_load_device,
+                            choices=["cuda", "neuron", "hpu", "cpu"],
+                            help='Device on which weights are loaded.')
         parser.add_argument(
             '--dtype',
             type=str,
@@ -224,11 +231,12 @@ class EngineArgs:
         parser.add_argument(
             '--kv-cache-dtype',
             type=str,
-            choices=['auto', 'fp8', 'fp8_e5m2', 'fp8_e4m3'],
+            choices=['auto', 'fp8', 'fp8_e5m2', 'fp8_e4m3', 'hf8'],
             default=EngineArgs.kv_cache_dtype,
             help='Data type for kv cache storage. If "auto", will use model '
             'data type. CUDA 11.8+ supports fp8 (=fp8_e4m3) and fp8_e5m2. '
-            'ROCm (AMD GPU) supports fp8 (=fp8_e4m3)')
+            'ROCm (AMD GPU) supports fp8 (=fp8_e4m3). '
+            'FP8_E4M3 is also supported on hpu (hf8).')
         parser.add_argument(
             '--quantization-param-path',
             type=nullable_str,
@@ -352,6 +360,11 @@ class EngineArgs:
             default=None,
             help='If specified, ignore GPU profiling result and use this number'
             'of GPU blocks. Used for testing preemption.')
+        parser.add_argument(
+            '--split-qk-v',
+            type=bool,
+            default=EngineArgs.split_qk_v,
+            help='Whether to separate qk and v calculations.')
         parser.add_argument('--max-num-batched-tokens',
                             type=int,
                             default=EngineArgs.max_num_batched_tokens,
@@ -736,6 +749,7 @@ class EngineArgs:
             swap_space=self.swap_space,
             cache_dtype=self.kv_cache_dtype,
             num_gpu_blocks_override=self.num_gpu_blocks_override,
+            split_qk_v=self.split_qk_v,
             sliding_window=model_config.get_sliding_window(),
             enable_prefix_caching=self.enable_prefix_caching,
             cpu_offload_gb=self.cpu_offload_gb,
@@ -845,9 +859,11 @@ class EngineArgs:
             self.model_loader_extra_config[
                 "qlora_adapter_name_or_path"] = self.qlora_adapter_name_or_path
 
+        device = device_config.device if self.weights_load_device is None else self.weights_load_device
         load_config = LoadConfig(
             load_format=self.load_format,
             download_dir=self.download_dir,
+            device=device,
             model_loader_extra_config=self.model_loader_extra_config,
             ignore_patterns=self.ignore_patterns,
         )
