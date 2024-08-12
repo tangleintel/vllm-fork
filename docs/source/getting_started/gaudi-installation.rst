@@ -66,7 +66,7 @@ Currently, the latest features and performance optimizations are developed in Ga
    $ git clone https://github.com/HabanaAI/vllm-fork.git
    $ cd vllm-fork
    $ git checkout habana_main
-   $ python setup.py develop
+   $ pip install -e .
 
 
 Supported Features
