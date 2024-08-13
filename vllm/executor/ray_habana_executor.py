@@ -88,7 +88,7 @@ class RayHabanaExecutor(DistributedGPUExecutor):
         worker_wrapper_kwargs = self._get_worker_wrapper_args()
         for bundle_id, bundle in enumerate(placement_group.bundle_specs):
             resource_name = "HPU" if not is_fake_hpu() else "CPU"
-            if not bundle.get(resource_name,0):
+            if not bundle.get(resource_name, 0):
                 continue
             scheduling_strategy = PlacementGroupSchedulingStrategy(
                 placement_group=placement_group,
