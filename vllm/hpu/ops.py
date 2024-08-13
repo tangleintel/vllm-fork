@@ -13,8 +13,8 @@ import habana_frameworks.torch as htorch
 import torch
 import torch.nn.functional as F
 
-from vllm.worker.profiler import Profiler
 from vllm.logger import init_logger
+from vllm.worker.profiler import Profiler
 
 logger = init_logger()
 HPUFusedRMSNorm = None
