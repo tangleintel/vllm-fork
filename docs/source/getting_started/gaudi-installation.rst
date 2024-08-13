@@ -29,7 +29,7 @@ To verify that the Intel Gaudi software was correctly installed, run:
    $ pip list | habana # verify that habana-torch-plugin, habana-torch-dataloader, habana-pyhlml, habana-media-loader and habana_quantization_toolkit are installed
 
 Refer to `Intel Gaudi Software Stack
-Verification <https://docs.habana.ai/en/latest/Installation_Guide/SW_Verification.html#platform-upgrade>`__
+Verification <https://docs.habana.ai/en/latest/Installation_Guide/Platform_Upgrade_and_Unboxing.html#system-verifications-and-final-tests>`__
 for more details.
 
 Run Docker Image
