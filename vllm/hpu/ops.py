@@ -7,14 +7,18 @@
 import os
 from typing import Optional
 
-import habana_frameworks.torch as htorch
+from vllm.utils import is_fake_hpu
+
+if not is_fake_hpu():
+    import habana_frameworks.torch as htorch
+
 import torch
 import torch.nn.functional as F
 
 import vllm.hpu.utils as hpu_utils
 from vllm.logger import init_logger
 
-logger = init_logger()
+logger = init_logger(__name__)
 HPUFusedRMSNorm = None
 try:
     from habana_frameworks.torch.hpex.normalization import FusedRMSNorm

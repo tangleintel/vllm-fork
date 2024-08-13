@@ -207,8 +207,27 @@ def is_neuron() -> bool:
 
 @lru_cache(maxsize=None)
 def is_hpu() -> bool:
+    return _is_habana_frameworks_installed() or _is_built_for_hpu()
+
+
+@lru_cache(maxsize=None)
+def is_fake_hpu() -> bool:
+    return not _is_habana_frameworks_installed() and _is_built_for_hpu()
+
+
+@lru_cache(maxsize=None)
+def _is_habana_frameworks_installed() -> bool:
     from importlib import util
     return util.find_spec('habana_frameworks') is not None
+
+
+@lru_cache(maxsize=None)
+def _is_built_for_hpu() -> bool:
+    from importlib.metadata import PackageNotFoundError, version
+    try:
+        return "gaudi" in version("vllm")
+    except PackageNotFoundError:
+        return False
 
 
 @lru_cache(maxsize=None)
@@ -623,18 +642,24 @@ class HabanaMemoryProfiler:
 
     @staticmethod
     def current_device_memory_usage() -> float:
+        if is_fake_hpu():
+            return 0
         # Return the device memory usage in bytes.
         free_hpu_memory, total_hpu_memory = torch.hpu.mem_get_info()
         return total_hpu_memory - free_hpu_memory
 
     @staticmethod
     def current_free_device_memory() -> float:
+        if is_fake_hpu():
+            return 0
         # Return the device memory usage in bytes.
         free_hpu_memory, _ = torch.hpu.mem_get_info()
         return free_hpu_memory
 
     @staticmethod
     def total_device_memory() -> float:
+        if is_fake_hpu():
+            return 0
         # Return the device memory usage in bytes.
         _, total_hpu_memory = torch.hpu.mem_get_info()
         return total_hpu_memory

@@ -7,7 +7,10 @@
 
 from functools import wraps
 
-import habana_frameworks.torch as htorch
+from vllm.utils import is_fake_hpu
+
+if not is_fake_hpu():
+    import habana_frameworks.torch as htorch
 
 
 def with_mark_steps(fn):

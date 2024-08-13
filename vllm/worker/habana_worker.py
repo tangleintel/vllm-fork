@@ -6,7 +6,11 @@ import gc
 import os
 from typing import List, Optional, Set, Tuple
 
-import habana_frameworks.torch as htorch  # noqa:F401
+from vllm.utils import HabanaMemoryProfiler, format_bytes, is_fake_hpu
+
+if not is_fake_hpu():
+    import habana_frameworks.torch as htorch  # noqa:F401
+
 import torch
 import torch.distributed
 
@@ -21,7 +25,6 @@ from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
 from vllm.prompt_adapter.request import PromptAdapterRequest
 from vllm.sequence import ExecuteModelRequest
-from vllm.utils import HabanaMemoryProfiler, format_bytes
 from vllm.worker.cache_engine import CacheEngine
 from vllm.worker.habana_model_runner import HabanaModelRunner
 from vllm.worker.worker_base import LocalOrDistributedWorkerBase, WorkerInput
@@ -95,6 +98,8 @@ class HabanaWorker(LocalOrDistributedWorkerBase):
         if self.device_config.device.type == "hpu":
             self.device = torch.device("hpu")
             torch.hpu.set_device(self.device)
+        elif self.device_config.device_type == "cpu":
+            self.device = torch.device("cpu")
         else:
             raise RuntimeError(
                 f"Not support device type: {self.device_config.device}")
@@ -126,6 +131,8 @@ class HabanaWorker(LocalOrDistributedWorkerBase):
 
         # Execute a forward pass with dummy inputs to profile the memory usage
         # of the model.
+        if is_fake_hpu():
+            return 128, 0
         with HabanaMemoryProfiler() as m:
             self.model_runner.profile_run()
             torch.hpu.synchronize()
@@ -184,7 +191,8 @@ class HabanaWorker(LocalOrDistributedWorkerBase):
 
         with HabanaMemoryProfiler() as m:
             self._init_cache_engine()
-            torch.hpu.synchronize()
+            if not is_fake_hpu():
+                torch.hpu.synchronize()
         msg = ("Initializing cache engine "
                f"took {m.get_summary_string()}")
         logger.info(msg)
@@ -311,11 +319,12 @@ def init_worker_distributed_environment(
     local_rank: int = -1,
 ) -> None:
     """Initialize the distributed environment."""
+    backend = 'hccl' if not is_fake_hpu() else 'gloo'
     init_distributed_environment(parallel_config.world_size,
                                  rank,
                                  distributed_init_method,
                                  local_rank,
-                                 backend='hccl')
+                                 backend=backend)
 
     ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
                                       parallel_config.pipeline_parallel_size)
@@ -332,15 +341,17 @@ def init_worker_distributed_environment(
             "distributed_init_method must be set if torch.distributed "
             "is not already initialized")
     else:
+        backend = 'hccl' if not is_fake_hpu() else 'gloo'
         torch.distributed.init_process_group(
-            backend="hccl",
+            backend=backend,
             world_size=parallel_config.world_size,
             rank=rank,
             init_method=distributed_init_method,
         )
 
     # A small all_reduce for warmup & checking conformance.
-    dummy_tensor_hpu = torch.ones(1).to('hpu')
+    device = 'hpu' if not is_fake_hpu() else 'cpu'
+    dummy_tensor_hpu = torch.ones(1).to(device)
     torch.distributed.all_reduce(dummy_tensor_hpu)
     assert dummy_tensor_hpu.item() == parallel_config.world_size
     ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,

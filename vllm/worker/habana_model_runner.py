@@ -9,12 +9,17 @@ import itertools
 import math
 import operator
 import os
-import time 
+import time
 from enum import IntEnum
 from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
                     Optional, Set, Tuple, Type, TypeVar, Union)
 
-import habana_frameworks.torch as htorch
+from vllm.utils import (HabanaMemoryProfiler, format_bytes, is_fake_hpu,
+                        is_pin_memory_available, make_tensor_with_pad)
+
+if not is_fake_hpu():
+    import habana_frameworks.torch as htorch
+
 import torch
 
 from vllm.attention import AttentionMetadata, get_attn_backend
@@ -31,8 +36,6 @@ from vllm.model_executor.model_loader import get_model
 from vllm.sampling_params import SamplingParams
 from vllm.sequence import (IntermediateTensors, SamplerOutput, SequenceData,
                            SequenceGroupMetadata)
-from vllm.utils import (HabanaMemoryProfiler, format_bytes,
-                        is_pin_memory_available, make_tensor_with_pad)
 from vllm.worker.model_runner_base import (
     ModelRunnerBase, ModelRunnerInputBase,
     _add_attn_metadata_broadcastable_dict,
@@ -151,7 +154,8 @@ class HpuModelAdapter():
 
     def __init__(self, model, enforce_eager):
         self.model = model
-        if not htorch.utils.internal.is_lazy() and not enforce_eager:
+        if not is_fake_hpu() and not htorch.utils.internal.is_lazy(
+        ) and not enforce_eager:
             self.model = torch.compile(self.model,
                                        backend='hpu_backend',
                                        dynamic=False)
@@ -380,7 +384,9 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                if model_config is not None else None)
         self.device_config = (device_config
                               if device_config is not None else DeviceConfig())
-
+        if is_fake_hpu():
+            device_config.device = torch.device('cpu')
+            device_config.device_type = 'cpu'
         self.device = self.device_config.device
         self.enforce_eager = self.model_config.enforce_eager
         self.max_num_seqs = self.scheduler_config.max_num_seqs
@@ -1048,7 +1054,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             self.create_dummy_seq_group_metadata(i, seq_len, is_prompt)
             for i in range(batch_size)
         ]
-        torch.hpu.synchronize()
+        if not is_fake_hpu():
+            torch.hpu.synchronize()
         for _ in range(times):
             inputs = self.prepare_model_input(seqs)
             self.execute_model(inputs, kv_caches)
@@ -1220,6 +1227,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
 
 def _maybe_wrap_in_hpu_graph(*args, **kwargs):
+    if is_fake_hpu():
+        return HpuModelAdapter(*args, **kwargs)
     return htorch.hpu.wrap_in_hpu_graph(HpuModelAdapter(
         *args, **
         kwargs)) if htorch.utils.internal.is_lazy() else HpuModelAdapter(
@@ -1403,7 +1412,8 @@ class HabanaModelRunner(
         if multi_modal_input is not None:
             execute_model_kwargs.update(multi_modal_input)
 
-        htorch.core.mark_step()
+        if not is_fake_hpu():
+            htorch.core.mark_step()
         if self.is_driver_worker:
             model_event_name = ("model_"
                                 f"{'prompt' if is_prompt else 'decode'}_"
@@ -1428,7 +1438,8 @@ class HabanaModelRunner(
             sampling_metadata.selected_token_indices = None
             logits = self.model.compute_logits(hidden_states,
                                                sampling_metadata)
-        htorch.core.mark_step()
+        if not is_fake_hpu():
+            htorch.core.mark_step()
         # Only perform sampling in the driver worker.
         if not self.is_driver_worker:
             return []
@@ -1444,7 +1455,8 @@ class HabanaModelRunner(
                 sampling_metadata=sampling_metadata,
             )
         output.outputs = output.outputs[:real_batch_size]
-        htorch.core.mark_step()
+        if not is_fake_hpu():
+            htorch.core.mark_step()
 
         if self.is_driver_worker and self.profiler.enabled:
             # Stop recording 'execute_model' event
