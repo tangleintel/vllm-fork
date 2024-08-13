@@ -28,8 +28,8 @@ import torch
 import torch.nn as nn
 
 from vllm.model_executor.custom_op import CustomOp
-
 from vllm.platforms import current_platform
+
 if current_platform.is_hpu():
     from vllm.hpu.rotary_embed import HpuRotaryEmbedding
 

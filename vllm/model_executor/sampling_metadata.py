@@ -8,9 +8,9 @@ import torch
 from vllm.sampling_params import SamplingParams, SamplingType
 from vllm.sequence import SequenceData, SequenceGroupMetadata
 from vllm.triton_utils.sample import get_num_triton_sampler_splits
-from vllm.utils import (PyObjectCache, async_tensor_h2d,
+from vllm.utils import (PyObjectCache, async_tensor_h2d, is_hpu,
                         is_pin_memory_available, make_tensor_with_pad,
-                        maybe_expand_dim, is_hpu)
+                        maybe_expand_dim)
 
 _SAMPLING_EPS = 1e-5
 _SEED_0_REPLACEMENT = 3403598558
