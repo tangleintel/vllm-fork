@@ -23,6 +23,9 @@ from vllm.sequence import (CompletionSequenceGroupOutput, Logprob,
 SampleResultType = List[Tuple[List[int], List[int]]]
 
 
+import torch
+from habana_frameworks.torch.hpu.metrics import metric_localcontext
+
 class Sampler(nn.Module):
     """Samples the next tokens from the model's outputs.
 
@@ -89,10 +92,13 @@ class Sampler(nn.Module):
             logits: (num_tokens, vocab_size).
             sampling_metadata: Metadata for sampling.
         """
+        # breakpoint()
+        #with metric_localcontext("graph_compilation") as local_metric:
         assert logits is not None
         _, vocab_size = logits.shape
 
         # Prepare sampling tensors with pinned memory to avoid blocking.
+        '''
         if not sampling_metadata.reuse_sampling_tensors:
             self._init_sampling_tensors(logits, sampling_metadata)
         elif self._do_penalties:
@@ -101,16 +107,23 @@ class Sampler(nn.Module):
             # reuse sampling tensors, since "output_tokens" changes
             # between decode runs.
             self._init_sampling_tensors(logits, sampling_metadata)
+        '''
 
+        #breakpoint()
+        #print('SAMPLER HASH', torch.hpu.graphs.input_hash(sampling_metadata), torch.hpu.graphs.input_hash(logits), '..', torch.hpu.graphs.input_hash(sampling_metadata.num_prompts), torch.hpu.graphs.input_hash(sampling_metadata.reuse_sampling_tensors), torch.hpu.graphs.input_hash(sampling_metadata.selected_token_indices), torch.hpu.graphs.input_hash(sampling_metadata.skip_sampler_cpu_output))
+        '''
         assert self._sampling_tensors is not None
         sampling_tensors = self._sampling_tensors
         do_penalties = self._do_penalties
         do_top_p_top_k = self._do_top_p_top_k
         do_min_p = self._do_min_p
+        '''
 
-        logits = _apply_min_tokens_penalty(logits, sampling_metadata)
+	# TODO bring back
+        #logits = _apply_min_tokens_penalty(logits, sampling_metadata)
 
         # Apply presence and frequency penalties.
+        '''
         if do_penalties:
             logits = _apply_penalties(logits, sampling_tensors.prompt_tokens,
                                       sampling_tensors.output_tokens,
@@ -120,23 +133,27 @@ class Sampler(nn.Module):
 
         # Apply temperature scaling.
         # Use in-place division to avoid creating a new tensor.
+        print(sampling_tensors.temperatures, 'temp')
         logits.div_(sampling_tensors.temperatures.unsqueeze(dim=1))
 
+        print(do_top_p_top_k, do_min_p, do_penalties)
         if do_top_p_top_k:
             logits = _apply_top_k_top_p(logits, sampling_tensors.top_ps,
                                         sampling_tensors.top_ks)
 
         if do_min_p:
             logits = _apply_min_p(logits, sampling_tensors.min_ps)
+        '''
 
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
         probs = torch.softmax(logits, dim=-1, dtype=torch.float)
         # Compute the log probabilities.
-        logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float)
+        if False:#True:
+          logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float)
 
-        # Sample the next tokens.
-        sample_results, maybe_sampled_tokens_tensor = _sample(
+          # Sample the next tokens.
+          sample_results, maybe_sampled_tokens_tensor = _sample(
             probs,
             logprobs,
             sampling_metadata,
@@ -144,7 +161,14 @@ class Sampler(nn.Module):
             include_gpu_probs_tensor=self.include_gpu_probs_tensor,
             modify_greedy_probs=self._should_modify_greedy_probs_inplace,
             token_positions_only=self.sample_token_positions_only,
-        )
+          )
+        else:
+          #breakpoint()
+          logprobs = None
+          next_tokens = torch.multinomial(probs, num_samples=1).squeeze(1)
+          next_tokens_list = next_tokens.tolist()
+          sample_results = [([i],[0]) for i in next_tokens_list]
+          maybe_sampled_tokens_tensor = next_tokens.unsqueeze(1)# torch.tensor([[i] for i in next_tokens_list], device=logits.device)
 
         if self.include_gpu_probs_tensor:
             assert maybe_sampled_tokens_tensor is not None
@@ -156,16 +180,26 @@ class Sampler(nn.Module):
         prompt_logprobs = None
         sample_logprobs = None
         if not sampling_metadata.skip_sampler_cpu_output:
-            prompt_logprobs, sample_logprobs = _get_logprobs(
-                logprobs, sampling_metadata, sample_results)
+            #prompt_logprobs, sample_logprobs = _get_logprobs(
+            #    logprobs, sampling_metadata, sample_results)
+            #breakpoint()
+            #print()
+            prompt_logprobs = [None] * logits.shape[0]
+            sample_logprobs = [[{idx: Logprob(logprob=inf, rank=None, decoded_token=None)}] for idx in next_tokens_list]
+            '''
+[[{3001: Logprob(logprob=inf, rank=None, decoded_token=None)}], [{369: Logprob(logprob=inf, rank=None, decoded_token=None)}], [{1658: Logprob(logprob=inf, rank=None, decoded_token=None)}], [{198: Logprob(logprob=inf, rank=None, decoded_token=None)}], [{18437: Logprob(logprob=inf, rank=None, decoded_token=None)}], [{23: Logprob(logprob=inf, rank=None, decoded_token=None)}], [{9258: Logprob(logprob=inf, rank=None, decoded_token=None)}], [{1589: Logprob(logprob=inf, rank=None, decoded_token=None)}], [{54719: Logprob(logprob=inf, rank=None, decoded_token=None)}], [{330: Logprob(logprob=inf, rank=None, decoded_token=None)}], [{3001: Logprob(logprob=inf, rank=None, decoded_token=None)}], [{9135: Logprob(logprob=inf, rank=None, decoded_token=None)}], [{0: Logprob(logprob=inf, rank=None, decoded_token=None)}], [{32483: Logprob(logprob=inf, rank=None, decoded_token=None)}], [{9135: Logprob(logprob=inf, rank=None, decoded_token=None)}], [{9135: Logprob(logprob=inf, rank=None, decoded_token=None)}]]
 
-        return _build_sampler_output(
+            '''
+        #print('SAMPLER', local_metric.stats())
+        x = _build_sampler_output(
             sample_results,
             sampling_metadata,
             prompt_logprobs,
             sample_logprobs,
             on_device_tensors=on_device_tensors,
             skip_sampler_cpu_output=sampling_metadata.skip_sampler_cpu_output)
+        #breakpoint()
+        return x
 
     @property
     def _should_modify_greedy_probs_inplace(self) -> bool:
@@ -1096,11 +1130,11 @@ def _build_sampler_output(
         assert prompt_logprobs is not None
         assert sample_logprobs is not None
 
-        for (seq_group, sample_result, group_prompt_logprobs,
-             group_sample_logprobs) in zip(sampling_metadata.seq_groups,
-                                           sample_results, prompt_logprobs,
+        for (x, sample_result, group_prompt_logprobs,
+             group_sample_logprobs) in zip(sampling_metadata.seq_groups, sample_results, prompt_logprobs,
                                            sample_logprobs):
-            seq_ids = seq_group.seq_ids
+            seq_ids = x#.seq_ids# [0]#seq_group.seq_ids
+            # print(seq_ids)
             next_token_ids, parent_ids = sample_result
             seq_outputs: List[SequenceOutput] = []
             for parent_id, next_token_id, logprobs in zip(

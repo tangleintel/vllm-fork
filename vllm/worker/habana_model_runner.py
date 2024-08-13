@@ -865,6 +865,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 logits_tensor_list.append(logits_tensor[torch.tensor(logits_ids_list, device=seq_data.prev_logits.device)])
 
             prev_logits = torch.cat(logits_tensor_list, dim=0)
+            breakpoint()
             output = self.model.sample(
                     logits=prev_logits,
                     sampling_metadata=sampling_metadata,
@@ -1062,6 +1063,14 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             'is_prompt'
         ])
         return attention_metadata
+
+    def trim_sampling_metadata(self, metadata: SamplingMetadata) -> object:
+        sample_metadata = subtuple(metadata, 'TrimmedSamplingMetadata', [
+             'categorized_sample_indices', 'num_prompts', 'prepare', 'reuse_sampling_tensors', 'selected_token_indices', 'seq_groups', 'skip_sampler_cpu_output'
+        ])
+        return sample_metadata
+        
+
 
     def create_dummy_seq_group_metadata(self, group_id, seq_len, is_prompt):
         sampling_params = SamplingParams(temperature=0)
@@ -1541,10 +1550,16 @@ class HabanaModelRunner(
             prev_logits = torch.cat(logits_tensor_list, dim=0)
 
             with self.profiler.record_event('internal', f'sample_{"prompt" if is_prompt else "decode"}_bs{batch_size}_seq{seq_len}'):
+                #breakpoint()
+                x = sampling_metadata.seq_groups
+                sampling_metadata.seq_groups = [i.seq_ids for i in sampling_metadata.seq_groups]
+                sampling_metadata.categorized_sample_indices = None
+                y = self.trim_sampling_metadata(sampling_metadata)
                 output = self.model.sample(
                     logits=prev_logits,
-                    sampling_metadata=sampling_metadata,
+                    sampling_metadata=y,
                 )
+                sampling_metadata.seq_groups = x
             #TODO: check why broadcast failed for float tensor use dict instead
             model_kwargs = { }
             model_kwargs["input_ids"] =  output.sampled_token_ids
