@@ -98,13 +98,13 @@ def flat_pa(query,
     import pdb; pdb.set_trace()
 
     end_time = time.time()
-    # flops = flops_counter_flat_pa(num_att_heads=query.shape[1],
-    #                         batch_size=query.shape[0],
-    #                         query_seq_len=query.shape[2],
-    #                         max_seq_len=key.shape[1],
-    #                         query_embedding_dim=query.shape[3],
-    #                         value_embedding_dim=key.shape[3],
-    #                         duration=end_time - start_time)
+    flops = flops_counter_flat_pa(num_att_heads=query.shape[1], 
+                                    query_seq_len=query.shape[2], 
+                                    block_size=block_list.size(), 
+                                    context_lens=[1, 2, 3], 
+                                    query_embedding_dim=query.shape[3],
+                                    value_embedding_dim=key.shape[3],
+                                    duration=end_time - start_time)
     habana_profiler.record_counter(habana_profiler.get_timestamp_us(), {"TFLOPS": flops / 1e12})
     
     return attn
@@ -194,6 +194,7 @@ def flops_counter_flat_pa(num_att_heads,
                    block_size, 
                    context_lens, 
                    query_embedding_dim, 
-                   value_embedding_dim) -> float:
-    return sum([num_att_heads * query_seq_len * ceil(S_i / block_size) * block_size 
-                * 2 * (query_embedding_dim + value_embedding_dim) for S_i in context_lens])
+                   value_embedding_dim,
+                   duration) -> float:
+    return (sum([num_att_heads * query_seq_len * ceil(S_i / block_size) * block_size * 2 *
+            (query_embedding_dim + value_embedding_dim) for S_i in context_lens]) / duration)
