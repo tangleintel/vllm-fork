@@ -1059,7 +1059,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         for _ in range(times):
             inputs = self.prepare_model_input(seqs)
             self.execute_model(inputs, kv_caches)
-            torch.hpu.synchronize()
+            if not is_fake_hpu():
+                torch.hpu.synchronize()
         self.profiler.end()
         gc.collect()
 
@@ -1145,7 +1146,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.warmup_all_buckets(self.prompt_buckets, True, kv_caches)
         self.warmup_all_buckets(self.decode_buckets, False, kv_caches)
 
-        if not self.enforce_eager and htorch.utils.internal.is_lazy():
+        if not is_fake_hpu(
+        ) and not self.enforce_eager and htorch.utils.internal.is_lazy():
             assert self.mem_margin is not None, \
                 ("HabanaWorker.determine_num_available_blocks needs "
                 "to be called before warming up the model.")

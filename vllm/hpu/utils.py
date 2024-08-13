@@ -17,11 +17,13 @@ def with_mark_steps(fn):
 
     @wraps(fn)
     def wrapped(*args, **kwargs):
-        htorch.core.mark_step()
+        if not is_fake_hpu():
+            htorch.core.mark_step()
         result = fn(*args, **kwargs)
         del args
         del kwargs
-        htorch.core.mark_step()
+        if not is_fake_hpu():
+            htorch.core.mark_step()
         return result
 
     return wrapped

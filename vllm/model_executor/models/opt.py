@@ -100,6 +100,7 @@ class OPTAttention(nn.Module):
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
+        #        import pdb; pdb.set_trace()
         qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.chunk(chunks=3, dim=-1)
         attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
@@ -254,7 +255,6 @@ class OPTDecoder(nn.Module):
         if self.project_in is not None:
             inputs_embeds, _ = self.project_in(inputs_embeds)
         hidden_states = inputs_embeds + pos_embeds
-
         for i in range(len(self.layers)):
             layer = self.layers[i]
             hidden_states = layer(hidden_states, kv_caches[i], attn_metadata)

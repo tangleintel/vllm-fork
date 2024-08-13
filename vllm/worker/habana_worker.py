@@ -132,7 +132,10 @@ class HabanaWorker(LocalOrDistributedWorkerBase):
         # Execute a forward pass with dummy inputs to profile the memory usage
         # of the model.
         if is_fake_hpu():
-            return 128, 0
+            #            self.model_runner.profile_run()
+            cache_block_size = self.get_cache_block_size_bytes()
+            fake_hpu_cache_alloc = 4 * 2**30  # take 4 GiB flat on fake hpu
+            return fake_hpu_cache_alloc // cache_block_size, 0
         with HabanaMemoryProfiler() as m:
             self.model_runner.profile_run()
             torch.hpu.synchronize()
