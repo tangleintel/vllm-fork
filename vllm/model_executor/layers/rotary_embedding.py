@@ -28,9 +28,9 @@ import torch
 import torch.nn as nn
 
 from vllm.model_executor.custom_op import CustomOp
-from vllm.utils import is_hpu, is_tpu
 
-if is_hpu():
+from vllm.platforms import current_platform
+if current_platform.is_hpu():
     from vllm.hpu.rotary_embed import HpuRotaryEmbedding
 
 
@@ -81,7 +81,7 @@ class RotaryEmbedding(CustomOp):
         self.dtype = dtype
 
         cache = self._compute_cos_sin_cache()
-        self.use_native2 = is_tpu() and is_neox_style
+        self.use_native2 = current_platform.is_tpu() and is_neox_style
         if not self.use_native2:
             cache = cache.to(dtype)
             self.register_buffer("cos_sin_cache", cache, persistent=False)
@@ -797,7 +797,7 @@ def get_rope(
     if key in _ROPE_DICT:
         return _ROPE_DICT[key]
     if rope_scaling is None:
-        if is_hpu():
+        if current_platform.is_hpu():
             rotary_emb = HpuRotaryEmbedding(head_size,
                                             rotary_dim,
                                             max_position,

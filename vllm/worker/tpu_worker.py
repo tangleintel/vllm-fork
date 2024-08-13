@@ -104,7 +104,10 @@ class TPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         # Use persistent cache to avoid XLA recompilation.
         # NOTE(woosuk): This does not completely eliminate the recompilation
         # overhead because dynamo does not cache the compiled results.
-        xr.initialize_cache(envs.VLLM_XLA_CACHE_PATH, readonly=False)
+        # NOTE(woosuk): Set readonly=False only for the rank 0 process to avoid
+        # race conditions.
+        xr.initialize_cache(envs.VLLM_XLA_CACHE_PATH,
+                            readonly=not self.is_driver_worker)
 
     def load_model(self):
         self.model_runner.load_model()
@@ -140,8 +143,8 @@ class TPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         num_tpu_blocks = (num_tpu_blocks // 8) * 8  # Round down to 8.
 
         # Calculate the CPU KV cache size based on the config.
-        num_cpu_blocks = (self.cache_config.swap_space_bytes //
-                          block_size_bytes)
+        num_cpu_blocks = int(self.cache_config.swap_space_bytes //
+                             block_size_bytes)
         num_cpu_blocks = (num_cpu_blocks // 8) * 8  # Round down to 8.
         return num_tpu_blocks, num_cpu_blocks
 
