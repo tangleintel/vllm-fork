@@ -3,9 +3,11 @@ import torch.distributed as dist
 from torch.distributed import ProcessGroup
 
 from vllm.platforms import current_platform
+from vllm.utils import is_fake_hpu
 
 if current_platform.is_hpu():
-    import habana_frameworks.torch as htorch  # noqa: F401
+    if not is_fake_hpu():
+        import habana_frameworks.torch as htorch  # noqa: F401
 
 
 class HpuCommunicator:
@@ -22,7 +24,8 @@ class HpuCommunicator:
         # FIXME(kzawora): this is a workaround for a bug in Habana PT bridge
         # occurring when PT_HPU_ENABLE_LAZY_COLLECTIVES=true env var is used
         # (which is required for tensor parallel HPUGraph inference)
-        htorch.core.mark_step()
+        if not is_fake_hpu():
+            htorch.core.mark_step()
         dist.all_reduce(x, group=self.group)
         return x
 
@@ -37,7 +40,8 @@ class HpuCommunicator:
                                     dtype=x.dtype,
                                     device=x.device)
         # All-gather.
-        htorch.core.mark_step()
+        if not is_fake_hpu():
+            htorch.core.mark_step()
         dist.all_gather_into_tensor(output_tensor, x, group=self.group)
         # Reshape
         output_tensor = output_tensor.movedim(0, dim)

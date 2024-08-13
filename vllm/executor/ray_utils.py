@@ -3,7 +3,7 @@ from typing import List, Optional, Tuple
 from vllm.config import ParallelConfig
 from vllm.logger import init_logger
 from vllm.sequence import ExecuteModelRequest
-from vllm.utils import get_ip, is_hip, is_hpu, is_tpu, is_xpu
+from vllm.utils import get_ip, is_fake_hpu, is_hip, is_hpu, is_tpu, is_xpu
 from vllm.worker.worker_base import WorkerWrapperBase
 
 logger = init_logger(__name__)
@@ -97,7 +97,7 @@ def initialize_ray_cluster(
     if is_tpu():
         device_str = "TPU"
     elif is_hpu():
-        device_str = "HPU"
+        device_str = "HPU" if not is_fake_hpu() else 'CPU'
     # Create placement group for worker processes
     current_placement_group = ray.util.get_current_placement_group()
     if current_placement_group:
