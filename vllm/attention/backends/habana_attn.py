@@ -109,7 +109,7 @@ class HabanaAttentionImpl(AttentionImpl, torch.nn.Module):
 
         assert self.num_heads % self.num_kv_heads == 0
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
-        self.prefill_usefusedsdpa = os.getenv('VLLM_PREFILL_USE_FUSESDAPA', '0') == '1'
+        self.prefill_usefusedsdpa = os.getenv('VLLM_PROMPT_USE_FUSESDAPA', '0').lower() in ['1', 'true']
         suppored_head_sizes = HabanaPagedAttention.get_supported_head_sizes()
         if head_size not in suppored_head_sizes:
             raise ValueError(

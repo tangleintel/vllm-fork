@@ -227,7 +227,7 @@ class HpuModelAdapter():
     def __init__(self, model, block_size):
         self.model = model
         self.block_size = block_size
-        self.prefill_usefusedsdpa = os.getenv('VLLM_PREFILL_USE_FUSESDAPA', '0') == '1'
+        self.prefill_usefusedsdpa = os.getenv('VLLM_PROMPT_USE_FUSEDSDPA', '0').lower() in ['1', 'true']
 
     def _set_attn_bias(self, metadata, batch_size, seq_len, device, dtype):
         seq_lens_t = metadata.seq_lens_tensor
