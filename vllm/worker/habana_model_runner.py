@@ -113,14 +113,16 @@ def warmup_range_with_limit(config: Tuple[int, int, int, int], fill=True):
     
     # power_unpadded = [bmin*base^0(=bmin), bmin*base^1, bmin*base^2,        ...,      bmin*base^9(=bmax)]
     # power_unpadded = [128.00, 174.18, 237.02, 322.54, 438.91, 597.26, 812.75, 1105.98, 1505.01, 2048.00]
-    
-    # if step is False:
     # power_padded   = [   128,    256,    256,    384,    512,    640,    896,    1152,    1536,    2048]
     #                               ^_______^ 
     #                               duplicates
     #
+
+    # if step is False:
     # buckets        = [   128,    256,            384,    512,    640,    896,    1152,    1536,    2048]
-    
+    #                                      ^
+    #                                duplicate removed
+
     # if step is True:
     # buckets        = [   128,    256,    384,    512,    640,    768,    896,    1152,    1536,    2048]
     #                                       ^_______^_______^_______^ 
