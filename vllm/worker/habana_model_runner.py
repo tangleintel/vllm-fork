@@ -111,11 +111,16 @@ def warmup_range_with_limit(config: Tuple[int, int, int, int], fill=True):
     Example (bmin=128, bstep=128, bmax=2048, num_buckets=10):
 
     There are 16 possible buckets (2048/128), and we'll attempt to select 10 of them with exponential spacing.
-    base = (bmax/bmin) ** (1/(num_buckets-1))
+    base = (bmax/bmin) ** (1/(num_buckets-1)); (2048/128) ** (1/9) = 1.36079 in this example
     exponent = i
     power = base ** exponent
+    scaled_power = b_min * power
 
-    power_unpadded     = [bmin*base^0(=bmin), bmin*base^1, bmin*base^2,        ...,      bmin*base^9(=bmax)]
+    For i == 0, power is 1.36079 ** 0 = 1; scaled_power is 1 * 128 = 128 (==bmin)
+    For i == 9, power is 1.36079 ** 9 = 16; scaled_power is 16 * 128 = 2048 (==bmax)
+    
+
+    power_unpadded     = [bmin*base^0(==bmin), bmin*base^1, bmin*base^2,       ...,     bmin*base^9(==bmax)]
     power_unpadded     = [128.00, 174.18, 237.02, 322.54, 438.91, 597.26, 812.75, 1105.98, 1505.01, 2048.00]
  
     if fill is False:
