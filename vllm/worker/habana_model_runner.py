@@ -116,8 +116,8 @@ def warmup_range_with_limit(config: Tuple[int, int, int, int], fill=True):
     power = base ** exponent
     scaled_power = b_min * power
 
-    For i == 0, power is 1.36079 ** 0 = 1; scaled_power is 1 * 128 = 128 (==bmin)
-    For i == 9, power is 1.36079 ** 9 = 16; scaled_power is 16 * 128 = 2048 (==bmax)
+    For i == 0 (first bucket), power is 1.36079 ** 0 = 1; scaled_power is 1 * 128 = 128 (==bmin)
+    For i == 9 (last bucket), power is 1.36079 ** 9 = 16; scaled_power is 16 * 128 = 2048 (==bmax)
     
 
     power_unpadded     = [bmin*base^0(==bmin), bmin*base^1, bmin*base^2,       ...,     bmin*base^9(==bmax)]
