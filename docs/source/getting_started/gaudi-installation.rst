@@ -171,7 +171,7 @@ Bucketing mechanism
 ------------
 
 Intel Gaudi accelerators work best when operating on models with fixed tensor shapes. `Intel Gaudi Graph Compiler <https://docs.habana.ai/en/latest/Gaudi_Overview/Intel_Gaudi_Software_Suite.html#graph-compiler-and-runtime>`__ is responsible for generating optimized binary code that implements the given model topology on Gaudi. In its default configuration, the produced binary code may be heavily dependent on input and output tensor shapes, and can require graph recompilation when encountering differently shaped tensors within the same topology. While the resulting binaries utilize Gaudi efficiently, the compilation itself may introduce a noticeable overhead in end-to-end execution.
-In a dynamic inference serving scenario, there is a need to minimize the number of graph compilations and reduce the risk of graph compilation occuring during server runtime. Currently it is achieved by "bucketing" model's forward pass across two dimensions - ``batch_size`` and ``sequence_length``. 
+In a dynamic inference serving scenario, there is a need to minimize the number of graph compilations and reduce the risk of graph compilation occurring during server runtime. Currently it is achieved by "bucketing" model's forward pass across two dimensions - ``batch_size`` and ``sequence_length``. 
 
 .. note::
    Bucketing allows us to reduce the number of required graphs significantly, but it does not handle any graph compilation and device code generation - this is done in warmup and HPUGraph capture phase.
@@ -219,7 +219,7 @@ As an example, if a request of 3 sequences, with max sequence length of 412 come
 Warmup
 ------------
 
-Warmup is an optional, but highly recommended step occuring before vLLM server starts listening. It executes a forward pass for each bucket with dummy data. The goal is to pre-compile all graphs and not incur any graph compilation overheads within bucket boundries during server runtime. Each warmup step is logged during vLLM startup:
+Warmup is an optional, but highly recommended step occurring before vLLM server starts listening. It executes a forward pass for each bucket with dummy data. The goal is to pre-compile all graphs and not incur any graph compilation overheads within bucket boundaries during server runtime. Each warmup step is logged during vLLM startup:
 
 .. code-block::
 
@@ -248,7 +248,7 @@ HPU Graph capture
 
 When HPU Graphs are being used, they share the common memory pool ("usable memory") as KV cache, determined by ``gpu_memory_utilization`` flag (``0.9`` by default). 
 Before KV cache gets allocated, model weights are loaded onto the device, and a forward pass of the model is executed on dummy data, to estimate memory usage. 
-Only after that, ``gpu_memory_utilization`` flag is utilized - at its default value, 90% of free device memory will be marked at that point as usable.
+Only after that, ``gpu_memory_utilization`` flag is utilized - at its default value,  will mark 90% of free device memory at that point as usable.
 Next, KV cache gets allocated, model is warmed up, and HPU Graphs are captured. 
 Environment variable ``VLLM_GRAPH_RESERVED_MEM`` defines the ratio of memory reserved for HPU Graphs capture. 
 With its default value (``VLLM_GRAPH_RESERVED_MEM=0.4``), 40% of usable memory will be reserved for graph capture (later referred to as "usable graph memory"), and the remaining 60% will be utilized for KV cache. 
