@@ -118,28 +118,28 @@ def warmup_range_with_limit(config: Tuple[int, int, int, int], fill=True):
 
     For i == 0 (first bucket), power is 1.36079 ** 0 = 1; scaled_power is 1 * 128 = 128 (==bmin)
     For i == 9 (last bucket), power is 1.36079 ** 9 = 16; scaled_power is 16 * 128 = 2048 (==bmax)
-    
 
-    power_unpadded     = [bmin*base^0(==bmin), bmin*base^1, bmin*base^2,       ...,     bmin*base^9(==bmax)]
-    power_unpadded     = [128.00, 174.18, 237.02, 322.54, 438.91, 597.26, 812.75, 1105.98, 1505.01, 2048.00]
+    So, computing for all buckets:
+    scaled_powers_unpadded     = [bmin*base^0(==bmin), bmin*base^1, bmin*base^2,       ...,     bmin*base^9(==bmax)]
+    scaled_powers_unpadded     = [128.00, 174.18, 237.02, 322.54, 438.91, 597.26, 812.75, 1105.98, 1505.01, 2048.00]
  
     if fill is False:
-        power_padded   = [   128,    256,    256,    384,    512,    640,    896,    1152,    1536,    2048]
-                                       ^_______^ 
-                                       duplicates
+        scaled_powers_padded   = [   128,    256,    256,    384,    512,    640,    896,    1152,    1536,    2048]
+                                               ^_______^ 
+                                               duplicates
 
-        buckets        = [   128,    256,            384,    512,    640,    896,    1152,    1536,    2048]
-                                              ^ 
-                                      duplicate bucket removed
+        buckets                = [   128,    256,            384,    512,    640,    896,    1152,    1536,    2048]
+                                                      ^ 
+                                         duplicate bucket removed
 
         len(buckets) = 9, num_buckets = 10
 
     if fill is True:
-        buckets        = [   128,    256,    384,    512,    640,    768,    896,    1152,    1536,    2048]
-                                               ^_______^_______^_______^ 
-                                           closest unused buckets selected
-                                                       ^_______^_______^ 
-                                these become duplicates once previous duplicates are resolved 
+        buckets                = [   128,    256,    384,    512,    640,    768,    896,    1152,    1536,    2048]
+                                                      ^_______^_______^_______^ 
+                                                   closest unused buckets selected
+                                                              ^_______^_______^ 
+                                      these become duplicates once previous duplicates are resolved 
         
         In this case we'll have four duplicated buckets:
 
