@@ -96,42 +96,65 @@ def warmup_range(config: Tuple[int, int, int]):
 
 
 def warmup_range_with_limit(config: Tuple[int, int, int, int], fill=True):
-    # NOTE(kzawora): we'll use exponential spacing for buckets 
-    # in which scaled power will return bmin for first bucket 
-    # iteration, and bmax for last iteration, with elements between 
-    # determined by the exponent, and base being unchanged. 
-    # Note that after padding to bstep, duplicates may occur.
-    # If fill is False, duplicates are removed and less buckets 
-    # are returned 
-    # If fill is True, duplicates are resolved by selecting the 
-    # closest (greater or lesser) bucket.
+    """
+    NOTE(kzawora): we'll use exponential spacing for buckets in which scaled power will return 
+    bmin for first bucket iteration, and bmax for last iteration, with elements between determined 
+    by the exponent, and base being unchanged. Note that after padding to bstep, duplicates may occur. 
+    Handling of duplicates is configured by fill parameter. 
 
-    # Example (bmin=128, bstep=128, bmax=2048, num_buckets=10)
-    # base = (bmax/bmin) ** (1/(num_buckets-1))
-    # exponent = i
-    # power = base ** exponent
+    If fill is False, duplicates are removed and less buckets are returned. 
+    
+    If fill is True, duplicates are resolved by selecting the closest (larger or smaller) 
+    bucket. If duplicate resolution is not possible, less buckets are returned. In that case, 
+    buckets are guaranteed to be linearly spaced.
 
-    # power_unpadded = [bmin*base^0(=bmin), bmin*base^1, bmin*base^2,        ...,      bmin*base^9(=bmax)]
-    # power_unpadded = [128.00, 174.18, 237.02, 322.54, 438.91, 597.26, 812.75, 1105.98, 1505.01, 2048.00]
+    Example (bmin=128, bstep=128, bmax=2048, num_buckets=10):
 
-    # if fill is False:
-    # power_padded   = [   128,    256,    256,    384,    512,    640,    896,    1152,    1536,    2048]
-    #                               ^_______^ 
-    #                               duplicates
-    #
-    # buckets        = [   128,    256,            384,    512,    640,    896,    1152,    1536,    2048]
+    There are 16 possible buckets (2048/128), and we'll attempt to select 10 of them with exponential spacing.
+    base = (bmax/bmin) ** (1/(num_buckets-1))
+    exponent = i
+    power = base ** exponent
 
-    # if fill is True:
-    # is_duplicated  = [ False,  False,   True,   True,   True,   True,  False,   False,   False,   False]
-    #                                               ^_______^_______^ 
-    #                               these become duplicates once previous duplicates are resolved  
+    power_unpadded     = [bmin*base^0(=bmin), bmin*base^1, bmin*base^2,        ...,      bmin*base^9(=bmax)]
+    power_unpadded     = [128.00, 174.18, 237.02, 322.54, 438.91, 597.26, 812.75, 1105.98, 1505.01, 2048.00]
+ 
+    if fill is False:
+        power_padded   = [   128,    256,    256,    384,    512,    640,    896,    1152,    1536,    2048]
+                                       ^_______^ 
+                                       duplicates
 
-    # buckets        = [   128,    256,    384,    512,    640,    768,    896,    1152,    1536,    2048]
-    #                                       ^_______^_______^_______^ 
-    #                                     closest unused buckets selected
-  
-    bmin, bstep, bmax, num_buckets = bucket_config
+        buckets        = [   128,    256,            384,    512,    640,    896,    1152,    1536,    2048]
+                                              ^ 
+                                      duplicate bucket removed
+
+        len(buckets) = 9, num_buckets = 10
+
+    if fill is True:
+        buckets        = [   128,    256,    384,    512,    640,    768,    896,    1152,    1536,    2048]
+                                               ^_______^_______^_______^ 
+                                           closest unused buckets selected
+                                                       ^_______^_______^ 
+                                these become duplicates once previous duplicates are resolved 
+        
+        In this case we'll have four duplicated buckets:
+
+        174.18 -> 256, optimal bucket,
+        237.02 -> (256) -> 384, taking closest available bucket, as optimal bucket 256 was already captured by 174.18, 
+        322.54 -> (384) -> 512, taking closest available bucket, as optimal bucket 384 was already captured by 237.02,
+        438.91 -> (512) -> 640, taking closest available bucket, as optimal bucket 512 was already captured by 322.54,
+        597.26 -> (640) -> 768, taking closest available bucket, as optimal bucket 640 was already captured by 438.91,
+        812.75 -> 896, optimal bucket
+
+        len(buckets) = 10, num_buckets = 10
+
+        In this case, the end result has the same buckets as fill=False, but with additional bucket 768 added. 
+        The difference is more pronounced for larger ranges and larger number of buckets.
+
+    """
+
+    bmin, bstep, bmax, num_buckets = config
     linear_buckets = set(np.arange(bmin, bmax+1, step=bstep))
+    print(len(linear_buckets))
     assert num_buckets > 0, "num_buckets must be a positive integer"
     if num_buckets == 1:
         return [bmax]
