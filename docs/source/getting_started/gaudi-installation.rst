@@ -248,7 +248,7 @@ HPU Graph capture
 
 When HPU Graphs are being used, they share the common memory pool ("usable memory") as KV cache, determined by ``gpu_memory_utilization`` flag (``0.9`` by default). 
 Before KV cache gets allocated, model weights are loaded onto the device, and a forward pass of the model is executed on dummy data, to estimate memory usage. 
-Only after that, ``gpu_memory_utilization`` flag is utilized - at its default value, it will mark 90% of free device memory at that point as usable.
+Only after that, ``gpu_memory_utilization`` flag is utilized - at its default value, 90% of free device memory will be marked at that point as usable.
 Next, KV cache gets allocated, model is warmed up, and HPU Graphs are captured. 
 Environment variable ``VLLM_GRAPH_RESERVED_MEM`` defines the ratio of memory reserved for HPU Graphs capture. 
 With its default value (``VLLM_GRAPH_RESERVED_MEM=0.4``), 40% of usable memory will be reserved for graph capture (later referred to as "usable graph memory"), and the remaining 60% will be utilized for KV cache. 
