@@ -15,7 +15,9 @@ def insert_or_update_cache(input, cache, block_indices, block_offsets):
     if block_offsets is None:
         cache.index_copy_(0, block_indices, input)
     else:
-        cache.index_put_((block_indices, block_offsets), input)
+        mask = torch.ones_like(cache)
+        mask[block_indices, block_offsets]=0
+        cache = cache * mask + input.unsqueeze(0).expand(cache.size(0), -1, -1, -1) * (1 - mask)
 
 
 def swap_blocks(src, dst, block_mapping):
