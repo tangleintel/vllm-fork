@@ -32,6 +32,8 @@ Refer to `Intel Gaudi Software Stack
 Verification <https://docs.habana.ai/en/latest/Installation_Guide/Platform_Upgrade_and_Unboxing.html#system-verifications-and-final-tests>`__
 for more details.
 
+.. _gaudi_installation:
+
 Run Docker Image
 ----------------
 

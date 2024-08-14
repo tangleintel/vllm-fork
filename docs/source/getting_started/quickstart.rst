@@ -9,7 +9,7 @@ This guide shows how to use vLLM to:
 * build an API server for a large language model;
 * start an OpenAI-compatible API server.
 
-You may run the following examples in a Gaudi container with `vLLM-fork <https://github.com/HabanaAI/vllm-fork>` installed in it as mentioned in the :ref:`Gaudi installation instructions <gaudi-installation>`.
+You may run the following examples in a Gaudi container with `vLLM-fork <https://github.com/HabanaAI/vllm-fork>`_ installed in it as mentioned in the :ref:`Gaudi installation instructions <gaudi_installation>`.
 
 
 .. note::
