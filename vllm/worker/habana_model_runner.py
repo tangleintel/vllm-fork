@@ -95,49 +95,54 @@ def warmup_range(config: Tuple[int, int, int]):
     return list(ramp_up_tw) + list(stable)
 
 
-def warmup_range_with_limit(config: Tuple[int, int, int, int]):
+def warmup_range_with_limit(config: Tuple[int, int, int, int], fill=True):
+    # NOTE(kzawora): we'll use exponential spacing for buckets 
+    # in which scaled power will return bmin for first bucket 
+    # iteration, and bmax for last iteration, with elements between 
+    # determined by the exponent, and base being unchanged. 
+    # Note that after padding to bstep, duplicates may occur.
+    # If fill is False, duplicates are removed and less buckets 
+    # are returned 
+    # If fill is True, duplicates are resolved by selecting the 
+    # closest (greater or lesser) bucket.
 
-    def find_bucket(value: int, config: Tuple[int, int, int]):
-        bmin, bstep, bmax = config
-        if value < bstep:
-            result = min(next_pow2(value), bstep)
+    # Example (bmin=128, bstep=128, bmax=2048, num_buckets=10)
+    # base = (bmax/bmin) ** (1/(num_buckets-1))
+    # exponent = i
+    # power = base ** exponent
+    
+    # power_unpadded = [bmin*base^0(=bmin), bmin*base^1, bmin*base^2,        ...,      bmin*base^9(=bmax)]
+    # power_unpadded = [128.00, 174.18, 237.02, 322.54, 438.91, 597.26, 812.75, 1105.98, 1505.01, 2048.00]
+    
+    # if step is False:
+    # power_padded   = [   128,    256,    256,    384,    512,    640,    896,    1152,    1536,    2048]
+    #                               ^_______^ 
+    #                               duplicates
+    #
+    # buckets        = [   128,    256,            384,    512,    640,    896,    1152,    1536,    2048]
+    
+    # if step is True:
+    # buckets        = [   128,    256,    384,    512,    640,    768,    896,    1152,    1536,    2048]
+    #                                       ^_______^_______^_______^ 
+    #                                     closest unused buckets selected
+    bmin, bstep, bmax, num_buckets = bucket_config
+    linear_buckets = set(np.arange(bmin, bmax+1, step=bstep))
+    assert num_buckets > 0, "num_buckets must be a positive integer"
+    if num_buckets == 1:
+        return [bmax]
+    buckets = set()
+    for i in range(num_buckets):
+        power_unpadded = bmin * np.float_power(bmax/bmin, (1./float(num_buckets - 1))*i)
+        bucket = math.ceil(power_unpadded/bstep) * bstep
+        if fill and bucket in buckets:
+            available_buckets = linear_buckets.difference(buckets)
+            if len(available_buckets) == 0:
+                break # no point in continuing if there are no more unique buckets
+            new_bucket = min(available_buckets, key=lambda x:abs(x-power_unpadded))
+            buckets.add(new_bucket)
         else:
-            result = round_up(value, bstep)
-        return result
-
-    def quantize_bucketing_fn(bucket_config,
-                              num_buckets,
-                              fn=lambda x: np.tanh(x),
-                              fn_start=-1,
-                              fn_end=0,
-                              no_duplicate_buckets=True,
-                              num_tries=10):
-        bucket_min, _, bucket_max = bucket_config
-        best_out = None
-        assert num_buckets > 0, "num_buckets must be a positive integer"
-        if num_buckets == 1 or bucket_min == bucket_max:
-            return [bucket_max]
-        for i in range(num_tries):
-            ls = np.linspace(fn_start, fn_end, num=num_buckets + i)
-            fn_min = fn(ls[0])
-            fn_max = fn(ls[-1])
-            # shift interval [fn_min,fn_max] into [bucket_min,bucket_max]
-            # with linear interpolation
-            shifted_fn = lambda x, fn_min, fn_max: (fn(x) - fn_min) / (
-                fn_max - fn_min) * (bucket_max - bucket_min) + bucket_min
-            buckets = [shifted_fn(i, fn_min, fn_max) for i in ls]
-            out = list(
-                sorted({int(find_bucket(b, bucket_config))
-                        for b in buckets}))
-            if not no_duplicate_buckets or len(out) == num_buckets:
-                return out
-            if best_out is None or len(out) < num_buckets and len(
-                    best_out) <= len(out):
-                best_out = out
-        return best_out
-
-    return quantize_bucketing_fn(config[:3], config[3])
-
+            buckets.add(bucket)
+    return list(sorted(buckets))
 
 def warmup_buckets(bs_bucket_config, seq_bucket_config):
     bs_buckets = warmup_range(bs_bucket_config[:3])
