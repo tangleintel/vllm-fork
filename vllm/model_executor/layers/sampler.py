@@ -79,6 +79,11 @@ class Sampler(nn.Module):
         self._do_top_p_top_k = do_top_p_top_k
         self._do_min_p = do_min_p
 
+        self._top_p_scalar = sampling_tensors.top_ps[0].item()
+        self._top_k_scalar = sampling_tensors.top_ks[0].item()
+        self._scalar_p_and_k = (torch.all(sampling_tensors.top_ps == self._top_p_scalar) \
+                               and torch.all(sampling_tensors.top_ks == self._top_k_scalar)).item()
+
     def forward(
         self,
         logits: torch.Tensor,
@@ -123,7 +128,11 @@ class Sampler(nn.Module):
         logits.div_(sampling_tensors.temperatures.unsqueeze(dim=1))
 
         if do_top_p_top_k:
-            logits = _apply_top_k_top_p_opt(logits, sampling_tensors.top_ps,
+            if self._scalar_p_and_k:
+                logits = _apply_top_k_top_p_opt(logits, self._top_p_scalar,
+                                        self._top_k_scalar)
+            else:
+                logits = _apply_top_k_top_p(logits, sampling_tensors.top_ps,
                                         sampling_tensors.top_ks)
 
         if do_min_p:
@@ -271,15 +280,12 @@ def _apply_penalties(logits: torch.Tensor, prompt_tokens_tensor: torch.Tensor,
 
 def _apply_top_k_top_p_opt(
     logits: torch.Tensor,
-    p_tensor: torch.Tensor,
-    k_tensor: torch.Tensor,
+    p: float,
+    k: int,
 ) -> torch.Tensor:
-    p = p_tensor[0].item()
-    k = k_tensor[0].item()
-
-    xx = torch.topk(logits, k=k, dim=1, sorted=True)
-    idx = torch.fliplr(xx.indices)
-    vals = torch.fliplr(xx.values)
+    topk_results = torch.topk(logits, k=k, dim=1, sorted=True)
+    idx = torch.fliplr(topk_results.indices)
+    vals = torch.fliplr(topk_results.values)
 
     probs_sort = vals.softmax(dim=-1)
     probs_sum = torch.cumsum(probs_sort, dim=1)
