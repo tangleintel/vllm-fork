@@ -271,7 +271,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
 
         output = self.model_runner.execute_model(
             model_input, self.kv_cache[worker_input.virtual_engine]
-            if self.kv_cache is not None else None, intermediate_tensors, execute_model_req.seq_group_metadata_list,
+            if self.kv_cache is not None else None, intermediate_tensors, execute_model_req.seq_group_metadata_list if execute_model_req else None ,
             num_steps)
 
         if not get_pp_group().is_last_rank:

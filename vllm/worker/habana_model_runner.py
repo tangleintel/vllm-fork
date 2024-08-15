@@ -1627,7 +1627,7 @@ class HabanaModelRunner(
         htorch.core.mark_step()
         # Only perform sampling in the driver worker.
         if not self.is_driver_worker:
-            return None
+            return []
         if not self.scheduler_config.enable_delayed_sampling:
         # Sample the next token.
             with self.profiler.record_event(
