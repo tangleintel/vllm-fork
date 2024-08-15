@@ -84,6 +84,7 @@ def run_vllm(
     gpu_memory_utilization: float = 0.9,
     download_dir: Optional[str] = None,
     load_format: str = EngineArgs.load_format,
+    enable_delayed_sampling:bool=False, 
 ) -> float:
     from vllm import LLM, SamplingParams
     llm = LLM(
@@ -105,7 +106,12 @@ def run_vllm(
         enable_chunked_prefill=enable_chunked_prefill,
         max_num_batched_tokens=max_num_batched_tokens,
         distributed_executor_backend=distributed_executor_backend,
-        load_format=load_format,
+        load_format=load_format,        
+        block_size=128,
+        max_num_seqs=128,
+        num_lookahead_slots=1 if enable_delayed_sampling else None,
+        use_v2_block_manager=True if enable_delayed_sampling else None,
+        enable_delayed_sampling=True if enable_delayed_sampling else None,
     )
 
     # Add the requests to the engine.
@@ -232,7 +238,7 @@ def main(args: argparse.Namespace):
             args.quantization_param_path, args.device,
             args.enable_prefix_caching, args.enable_chunked_prefill,
             args.max_num_batched_tokens, args.distributed_executor_backend,
-            args.gpu_memory_utilization, args.download_dir, args.load_format)
+            args.gpu_memory_utilization, args.download_dir, args.load_format, args.enable_delayed_sampling)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
         elapsed_time = run_hf(requests, args.model, tokenizer, args.n,
@@ -370,6 +376,7 @@ if __name__ == "__main__":
                         default=None,
                         help='directory to download and load the weights, '
                         'default to the default cache dir of huggingface')
+    parser.add_argument("--enable-delayed-sampling", action="store_true")
     parser.add_argument(
         '--output-json',
         type=str,
