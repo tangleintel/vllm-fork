@@ -129,7 +129,7 @@ class Sampler(nn.Module):
 
         if do_top_p_top_k:
             if self._scalar_p_and_k:
-                logits = _apply_top_k_top_p_opt(logits, self._top_p_scalar,
+                logits = _apply_top_k_top_p_opt4(logits, self._top_p_scalar,
                                         self._top_k_scalar)
             else:
                 logits = _apply_top_k_top_p(logits, sampling_tensors.top_ps,
@@ -329,6 +329,48 @@ def _apply_top_k_top_p(
     logits = torch.gather(logits_sort, dim=-1, index=logits_idx_inv)
     return logits
 
+
+def _apply_top_k_top_p_opt4(
+    logits: torch.Tensor,
+    p: torch.Tensor,
+    k: torch.Tensor,
+) -> torch.Tensor:
+
+    xx = torch.topk(logits, k=k, dim=1, sorted=True)
+    idx = torch.fliplr(xx.indices)
+    vals = torch.fliplr(xx.values)
+
+    smallest_of_top_k = vals[:,0]
+    #breakpoint()
+    num_duplicates_of_smallest_of_topk = torch.sum(logits == smallest_of_top_k.unsqueeze(1), 1)
+    max_num_duplicates_of_smallest_of_topk = torch.max(num_duplicates_of_smallest_of_topk).item()
+
+    #print("SARKAR", max_num_duplicates_of_smallest_of_topk)
+
+    if max_num_duplicates_of_smallest_of_topk > 0: # TODO:  IS THIS IF NEEDED?
+        xx = torch.topk(logits, k=k+max_num_duplicates_of_smallest_of_topk, dim=1, sorted=True)
+        idx = torch.fliplr(xx.indices)
+        vals = torch.fliplr(xx.values)
+
+        # TODO can this part be optimized?
+        num_duplicates_of_smallest_of_topk_list = num_duplicates_of_smallest_of_topk.tolist()
+        lst = []
+        for i in num_duplicates_of_smallest_of_topk_list:
+            lst += [list(range(max_num_duplicates_of_smallest_of_topk-i)) + [max_num_duplicates_of_smallest_of_topk-i]*(i)]
+        vals.scatter_(1, torch.tensor(lst), -float("inf"))
+        
+
+    probs_sort = vals.softmax(dim=-1)
+    probs_sum = probs_sort.cumsum(dim=-1)  #torch.cumsum(probs_sort, dim=1)
+    top_p_mask = probs_sum <= (1 - p)
+    top_p_mask[:, -1] = False
+    vals.masked_fill_(top_p_mask, -float("inf"))
+
+    new_logits = torch.full(logits.shape, -float("inf"), device=logits.device)
+    new_logits.scatter_(1,idx,vals)
+
+
+    return new_logits
 
 def _apply_min_p(
     logits: torch.Tensor,
