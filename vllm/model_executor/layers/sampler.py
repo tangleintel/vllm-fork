@@ -123,7 +123,7 @@ class Sampler(nn.Module):
         logits.div_(sampling_tensors.temperatures.unsqueeze(dim=1))
 
         if do_top_p_top_k:
-            logits = _apply_top_k_top_p(logits, sampling_tensors.top_ps,
+            logits = _apply_top_k_top_p_opt(logits, sampling_tensors.top_ps,
                                         sampling_tensors.top_ks)
 
         if do_min_p:
@@ -269,6 +269,28 @@ def _apply_penalties(logits: torch.Tensor, prompt_tokens_tensor: torch.Tensor,
     logits -= presence_penalties.unsqueeze_(dim=1) * output_mask
     return logits
 
+def _apply_top_k_top_p_opt(
+    logits: torch.Tensor,
+    p_tensor: torch.Tensor,
+    k_tensor: torch.Tensor,
+) -> torch.Tensor:
+    p = p_tensor[0].item()
+    k = k_tensor[0].item()
+
+    xx = torch.topk(logits, k=k, dim=1, sorted=True)
+    idx = torch.fliplr(xx.indices)
+    vals = torch.fliplr(xx.values)
+
+    probs_sort = vals.softmax(dim=-1)
+    probs_sum = torch.cumsum(probs_sort, dim=1)
+    top_p_mask = probs_sum <= (1 - p)
+    top_p_mask[:, -1] = False
+    vals.masked_fill_(top_p_mask, -float("inf"))
+
+    new_logits = torch.full(logits.shape, -float("inf"), dtype=vals.dtype, device=logits.device)
+    new_logits.scatter_(1,idx,vals)
+
+    return new_logits
 
 def _apply_top_k_top_p(
     logits: torch.Tensor,
