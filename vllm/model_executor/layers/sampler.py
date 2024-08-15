@@ -52,6 +52,7 @@ class Sampler(nn.Module):
         # speculative decoding.
         self.include_gpu_probs_tensor = False
         self.sample_token_positions_only = False
+        self.cnt = 0
 
     def _init_sampling_tensors(
         self,
@@ -91,6 +92,8 @@ class Sampler(nn.Module):
         """
         assert logits is not None
         _, vocab_size = logits.shape
+        #breakpoint()
+        #print('SAMPLER HASH', torch.hpu.graphs.input_hash(sampling_metadata))
 
         # Prepare sampling tensors with pinned memory to avoid blocking.
         if not sampling_metadata.reuse_sampling_tensors:
@@ -122,12 +125,19 @@ class Sampler(nn.Module):
         # Use in-place division to avoid creating a new tensor.
         logits.div_(sampling_tensors.temperatures.unsqueeze(dim=1))
 
+        # THIS IS SLOW
         if do_top_p_top_k:
-            logits = _apply_top_k_top_p(logits, sampling_tensors.top_ps,
+            #torch.save([logits.to('cpu'), sampling_tensors.top_ps.to('cpu'), sampling_tensors.top_ks.to('cpu')], 'inp.pt')
+            #print(logits.device, sampling_tensors.top_ps.device, sampling_tensors.top_ks.device)
+            logits = _apply_top_k_top_p_opt3(logits, sampling_tensors.top_ps,
                                         sampling_tensors.top_ks)
+            #torch.save([logits.to('cpu'), sampling_tensors.top_ps.to('cpu'), sampling_tensors.top_ks.to('cpu')], f'inp_{self.cnt}.pt')
+            #self.cnt+=1
+            #logits = logits_new
 
         if do_min_p:
             logits = _apply_min_p(logits, sampling_tensors.min_ps)
+            # _apply_min_p has a softmax inside it... why redo it later?
 
         # We use float32 for probabilities and log probabilities.
         # Compute the probabilities.
@@ -136,15 +146,21 @@ class Sampler(nn.Module):
         logprobs = torch.log_softmax(logits, dim=-1, dtype=torch.float)
 
         # Sample the next tokens.
-        sample_results, maybe_sampled_tokens_tensor = _sample(
-            probs,
-            logprobs,
-            sampling_metadata,
-            sampling_tensors,
-            include_gpu_probs_tensor=self.include_gpu_probs_tensor,
-            modify_greedy_probs=self._should_modify_greedy_probs_inplace,
-            token_positions_only=self.sample_token_positions_only,
-        )
+        if True:
+            sample_results, maybe_sampled_tokens_tensor = _sample(
+                probs,
+                logprobs,
+                sampling_metadata,
+                sampling_tensors,
+                include_gpu_probs_tensor=self.include_gpu_probs_tensor,
+                modify_greedy_probs=self._should_modify_greedy_probs_inplace,
+                token_positions_only=self.sample_token_positions_only,
+            )
+        else:
+            next_tokens = torch.multinomial(probs, num_samples=1).squeeze(1)
+            next_tokens_list = next_tokens.tolist()
+            sample_results = [([i],[0]) for i in next_tokens_list]
+            maybe_sampled_tokens_tensor = next_tokens.unsqueeze(1)
 
         if self.include_gpu_probs_tensor:
             assert maybe_sampled_tokens_tensor is not None
@@ -158,6 +174,8 @@ class Sampler(nn.Module):
         if not sampling_metadata.skip_sampler_cpu_output:
             prompt_logprobs, sample_logprobs = _get_logprobs(
                 logprobs, sampling_metadata, sample_results)
+            #prompt_logprobs = [None] * logits.shape[0]
+            #sample_logprobs = [[{idx: Logprob(logprob=inf, rank=None, decoded_token=None)}] for idx in next_tokens_list]
 
         return _build_sampler_output(
             sample_results,
@@ -275,6 +293,9 @@ def _apply_top_k_top_p(
     p: torch.Tensor,
     k: torch.Tensor,
 ) -> torch.Tensor:
+
+    #breakpoint()
+    #print('IN _apply_top_k_top_p', logits.shape, p.shape, k.shape)
     logits_sort, logits_idx = logits.sort(dim=-1, descending=False)
 
     # Apply top-k.
@@ -285,12 +306,14 @@ def _apply_top_k_top_p(
     logits_sort.masked_fill_(top_k_mask, -float("inf"))
 
     # Apply top-p.
+    #'''
     probs_sort = logits_sort.softmax(dim=-1)
     probs_sum = probs_sort.cumsum(dim=-1)
     top_p_mask = probs_sum <= 1 - p.unsqueeze(dim=1)
     # at least one
     top_p_mask[:, -1] = False
     logits_sort.masked_fill_(top_p_mask, -float("inf"))
+    #'''
 
     # Re-sort the probabilities.
     src = torch.arange(logits_idx.shape[-1],
@@ -300,6 +323,102 @@ def _apply_top_k_top_p(
                                                            src=src)
     logits = torch.gather(logits_sort, dim=-1, index=logits_idx_inv)
     return logits
+
+
+
+def _apply_top_k_top_p_opt(
+    logits: torch.Tensor,
+    p_tensor: torch.Tensor,
+    k_tensor: torch.Tensor,
+) -> torch.Tensor:
+
+    #print('IN _apply_top_k_top_p', logits.shape, p.shape, k.shape)
+    p = p_tensor[0].item()
+    k = k_tensor[0].item()
+    
+    logits_sort, logits_idx = logits.sort(dim=-1, descending=False)
+    #bs = logits_sort.shape[0]
+    #device = logits.device
+
+    # Apply top-k.
+    #top_k_mask = logits_sort.size(1) - k.to(torch.long)
+    top_k_mask = logits_sort.size(1) - k
+    # Get all the top_k values.
+    
+    #top_k_mask = logits_sort.gather(1, top_k_mask.unsqueeze(dim=1))
+    top_k_mask = logits_sort[:,top_k_mask].unsqueeze(1)
+    top_k_mask = logits_sort < top_k_mask
+    logits_sort.masked_fill_(top_k_mask, -float("inf"))  # this fill needs to happen? cant fill by or-ing?
+
+    #print("xxx", torch.sum(torch.nan_to_num(logits_sort, nan=None, posinf=None, neginf=0)))
+
+    # Apply top-p.
+    probs_sort = logits_sort.softmax(dim=-1)
+    probs_sum = probs_sort.cumsum(dim=-1)
+    top_p_mask = probs_sum <= (1 - p)#.unsqueeze(dim=1)
+    #print('yyy', top_p_mask.sum())
+    # at least one
+    top_p_mask[:, -1] = False
+
+    #final_mask = torch.logical_or(top_k_mask, top_p_mask)
+    #print("top_k_mask", top_k_mask.sum())
+    #print("top_p_mask", top_p_mask.sum())
+    logits_sort.masked_fill_(top_p_mask, -float("inf"))
+
+    #print(torch.isinf(logits_sort).sum())
+    #breakpoint()
+
+    # Re-sort the probabilities.
+    src = torch.arange(logits_idx.shape[-1],
+                       device=logits_idx.device).expand_as(logits_idx)
+    logits_idx_inv = torch.empty_like(logits_idx).scatter_(dim=-1,
+                                                           index=logits_idx,
+                                                           src=src)
+    logits = torch.gather(logits_sort, dim=-1, index=logits_idx_inv)
+    return logits
+
+
+# functionaly wrong... doesnt do top_p
+def _apply_top_k_top_p_opt2(
+    logits: torch.Tensor,
+    p: torch.Tensor,
+    k_tensor: torch.Tensor,
+) -> torch.Tensor:
+    #p = p_tensor[0].item()
+    k = k_tensor[0].item()
+    xx = torch.topk(logits, k=k, dim=1)
+    idx = xx.indices
+    vals = xx.values
+
+    top_k_mask = logits < vals[:,-1].unsqueeze(1)
+
+    logits.masked_fill_(top_k_mask, -float("inf"))
+
+    return logits
+
+
+def _apply_top_k_top_p_opt3(
+    logits: torch.Tensor,
+    p_tensor: torch.Tensor,
+    k_tensor: torch.Tensor,
+) -> torch.Tensor:
+    p = p_tensor[0].item()
+    k = k_tensor[0].item()
+
+    xx = torch.topk(logits, k=k, dim=1, sorted=True)
+    idx = torch.fliplr(xx.indices)
+    vals = torch.fliplr(xx.values)
+
+    probs_sort = vals.softmax(dim=-1)
+    probs_sum = torch.cumsum(probs_sort, dim=1)
+    top_p_mask = probs_sum <= (1 - p)
+    top_p_mask[:, -1] = False
+    vals.masked_fill_(top_p_mask, -float("inf"))
+
+    new_logits = torch.full(logits.shape, -float("inf"), device=logits.device)
+    new_logits.scatter_(1,idx,vals)
+
+    return new_logits
 
 
 def _apply_min_p(

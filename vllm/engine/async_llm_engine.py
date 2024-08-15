@@ -694,7 +694,7 @@ class AsyncLLMEngine:
         )
         PROFILE=False
         if PROFILE:
-            #hb_profer.start()
+            hb_profer.start()
 
             step_count = 0
         while True:
@@ -757,10 +757,10 @@ class AsyncLLMEngine:
                 self.set_errored(exc)
                 raise
             if PROFILE:
-                #hb_profer.step()
+                hb_profer.step()
                 step_count = step_count + 1
                 if step_count == ACTIVE_STEP + WARMUP_STEP:
-                    #hb_profer.stop()
+                    hb_profer.stop()
                     exit()
             await asyncio.sleep(0)
 

@@ -1063,6 +1063,17 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         ])
         return attention_metadata
 
+
+    def trim_sampling_metadata(self, metadata: SamplingMetadata) -> object:
+        sample_metadata = subtuple(metadata, 'TrimmedSamplingMetadata', [
+             'categorized_sample_indices', 'num_prompts', 'prepare', 'reuse_sampling_tensors', 'selected_token_indices', 'seq_groups', 'skip_sampler_cpu_output'
+        ])
+        for idx, item in enumerate(sample_metadata.seq_groups):
+            sample_metadata.seq_groups[idx] = subtuple(sample_metadata.seq_groups[idx], 'TrimmedSequenceGroupToSample', [ 'is_prompt', 'prompt_logprob_indices', 'query_len', 'sample_indices', 'sampling_params', 'seq_data', 'seq_ids', 'seq_len', 'do_sample'])
+        #sampling_params
+        #seq_data
+        return sample_metadata
+
     def create_dummy_seq_group_metadata(self, group_id, seq_len, is_prompt):
         sampling_params = SamplingParams(temperature=0)
         num_blocks = math.ceil(seq_len / self.block_size)
@@ -1541,9 +1552,10 @@ class HabanaModelRunner(
             prev_logits = torch.cat(logits_tensor_list, dim=0)
 
             with self.profiler.record_event('internal', f'sample_{"prompt" if is_prompt else "decode"}_bs{batch_size}_seq{seq_len}'):
+                #breakpoint()
                 output = self.model.sample(
                     logits=prev_logits,
-                    sampling_metadata=sampling_metadata,
+                    sampling_metadata=self.trim_sampling_metadata(sampling_metadata),
                 )
             #TODO: check why broadcast failed for float tensor use dict instead
             model_kwargs = { }
