@@ -16,7 +16,7 @@ import torch.nn.functional as F
 from vllm.logger import init_logger
 from vllm.worker.profiler import Profiler
 
-logger = init_logger()
+logger = init_logger(__name__)
 HPUFusedRMSNorm = None
 try:
     from habana_frameworks.torch.hpex.normalization import FusedRMSNorm
@@ -44,7 +44,12 @@ def paged_attention_v1(query,
                        context_lens,
                        block_size,
                        alibi_slopes=None,
-                       kv_cache_dtype=None) -> None:
+                       kv_cache_dtype=None,
+                       matmul_qk_op=torch.matmul,
+                       softmax_op=torch.softmax,
+                       matmul_av_op=torch.matmul,
+                       k_cache_cls=None,
+                       v_cache_cls=None) -> None:
     habana_profiler = Profiler()
     torch.hpu.synchronize()
     start_time = time.time()
@@ -62,19 +67,23 @@ def paged_attention_v1(query,
                                  batch_size, 1, 1, -1))
     query.mul_(scale)
     query = query.unsqueeze(-2)
-    keys = fetch_from_cache(key_cache, block_tables, (0, 2, 3, 1))
+    fetch_keys = fetch_from_cache if k_cache_cls is None else \
+                 k_cache_cls.fetch_from_cache
+    keys = fetch_keys(key_cache, block_tables, (0, 2, 3, 1))
     if query_heads != kv_heads:
         query = query.unflatten(1, (kv_heads, -1))
         keys = [k.unflatten(1, (kv_heads, 1)) for k in keys]
         mask = mask.unsqueeze(2)
 
-    attn_weights = torch.cat([torch.matmul(query, k) for k in keys], dim=-1)
+    attn_weights = torch.cat([matmul_qk_op(query, k) for k in keys], dim=-1)
     if alibi_slopes is not None:
         attn_weights.add_(alibi_slopes[:, :, -attn_weights.size(2):,
                                        -attn_weights.size(3):])
-    attn_weights = (attn_weights.masked_fill(mask, min_inf).softmax(dim=-1))
+    attn_weights = softmax_op(attn_weights.masked_fill(mask, min_inf), dim=-1)
 
-    values = fetch_from_cache(value_cache, block_tables, (0, 2, 1, 3))
+    fetch_values = fetch_from_cache if v_cache_cls is None else \
+                   v_cache_cls.fetch_from_cache
+    values = fetch_values(value_cache, block_tables, (0, 2, 1, 3))
     if PA_SPLIT_VALUE:
         attn_weights = attn_weights.split(block_size, dim=-1)
     else:
@@ -82,7 +91,7 @@ def paged_attention_v1(query,
         attn_weights = [attn_weights]
     if query_heads != kv_heads:
         values = [v.unflatten(1, (kv_heads, 1)) for v in values]
-    attn_weights = [torch.matmul(a, v) for a, v in zip(attn_weights, values)]
+    attn_weights = [matmul_av_op(a, v) for a, v in zip(attn_weights, values)]
     if query_heads != kv_heads:
         attn_weights = [a.flatten(1, 2) for a in attn_weights]
     attn_weights = sum(attn_weights)
@@ -148,6 +157,9 @@ def prompt_attention(
     attn_bias: Optional[torch.Tensor] = None,
     p: float = 0.0,
     scale: Optional[float] = None,
+    matmul_qk_op=torch.matmul,
+    softmax_op=torch.softmax,
+    matmul_av_op=torch.matmul,
 ) -> torch.Tensor:
     habana_profiler = Profiler()
     start_time = time.time()
@@ -164,11 +176,11 @@ def prompt_attention(
         value = value.unflatten(1, (kv_heads, 1))
         if attn_bias is not None:
             attn_bias = attn_bias.unsqueeze(2)
-    attn_weights = torch.matmul(query * scale, key.transpose(-1, -2))
+    attn_weights = matmul_qk_op(query * scale, key.transpose(-1, -2))
     if attn_bias is not None:
         attn_weights.add_(attn_bias)
-    attn_weights = torch.softmax(attn_weights, dim=-1)
-    attn_weights = torch.matmul(attn_weights, value)
+    attn_weights = softmax_op(attn_weights, dim=-1)
+    attn_weights = matmul_av_op(attn_weights, value)
     if query_heads != kv_heads:
         attn_weights = attn_weights.flatten(1, 2)
     attn_weights = attn_weights.transpose(1, 2)
