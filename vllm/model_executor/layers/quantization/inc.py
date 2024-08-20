@@ -62,13 +62,15 @@ class INCConfig(QuantizationConfig):
     def get_scaled_act_names(self) -> List[str]:
         return []
 
-    def get_min_capability(self) -> int:
+    @classmethod
+    def get_min_capability(cls) -> int:
         # The AWQ kernel only supports Turing or newer GPUs.
         return 75
 
     @staticmethod
     def get_config_filenames() -> List[str]:
         return []
+
 
 class INCLinearMethod(LinearMethodBase):
     """Linear method for FP8.
