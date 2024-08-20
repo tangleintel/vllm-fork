@@ -46,6 +46,12 @@ if TYPE_CHECKING:
     VLLM_USE_PRECOMPILED: bool = False
     VLLM_INSTALL_PUNICA_KERNELS: bool = False
     VLLM_NO_DEPRECATION_WARNING: bool = False
+    VLLM_PROFILER_ENABLED: bool = False
+    VLLM_HPU_LOG_STEP_GRAPH_COMPILATION: bool = False
+    VLLM_HPU_LOG_STEP_GRAPH_COMPILATION_ALL: bool = False
+    VLLM_HPU_LOG_STEP_CPU_FALLBACKS: bool = False
+    VLLM_HPU_LOG_STEP_CPU_FALLBACKS_ALL: bool = False
+    VLLM_SKIP_WARMUP: bool = False
     CMAKE_BUILD_TYPE: Optional[str] = None
     VERBOSE: bool = False
 
@@ -313,6 +319,48 @@ environment_variables: Dict[str, Callable[[], Any]] = {
     # If set, vllm will skip the deprecation warnings.
     "VLLM_NO_DEPRECATION_WARNING":
     lambda: bool(int(os.getenv("VLLM_NO_DEPRECATION_WARNING", "0"))),
+
+    # HPU-specific.
+    # If true, high level profiler for HPU will be enabled.
+    # Resulting JSON traces can be viewed in perfetto.habana.ai.
+    # Disabled by default.
+    "VLLM_PROFILER_ENABLED":
+    lambda: bool(os.getenv("VLLM_PROFILER_ENABLED", False)),
+
+    # HPU-specific.
+    # If true, will log graph compilations per each vLLM engine step,
+    # only when there was any - highly recommended to use alongside
+    # PT_HPU_METRICS_GC_DETAILS=1.
+    # Disabled by default.
+    "VLLM_HPU_LOG_STEP_GRAPH_COMPILATION":
+    lambda: bool(os.getenv("VLLM_HPU_LOG_STEP_GRAPH_COMPILATION", False)),
+
+    # HPU-specific.
+    # If true, will log graph compilations per each vLLM engine step,
+    # always, even if there were none.
+    # Disabled by default.
+    "VLLM_HPU_LOG_STEP_GRAPH_COMPILATION_ALL":
+    lambda: bool(os.getenv("VLLM_HPU_LOG_STEP_GRAPH_COMPILATION_ALL", False)),
+
+    # HPU-specific.
+    # If true, will log cpu fallbacks per each vLLM engine step,
+    # only when there was any.
+    # Disabled by default.
+    "VLLM_HPU_LOG_STEP_CPU_FALLBACKS":
+    lambda: bool(os.getenv("VLLM_HPU_LOG_STEP_CPU_FALLBACKS", False)),
+
+    # HPU-specific.
+    # If true, will log cpu fallbacks per each vLLM engine step,
+    # always, even if there were none.
+    # Disabled by default.
+    "VLLM_HPU_LOG_STEP_CPU_FALLBACKS_ALL":
+    lambda: bool(os.getenv("VLLM_HPU_LOG_STEP_CPU_FALLBACKS_ALL", False)),
+
+    # HPU-specific.
+    # If true, warmup will be skipped.
+    # Disabled by default.
+    "VLLM_SKIP_WARMUP":
+    lambda: bool(os.getenv("VLLM_SKIP_WARMUP", False)),
 }
 
 # end-env-vars-definition

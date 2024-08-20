@@ -39,6 +39,7 @@ from vllm.worker.model_runner_base import (
     _add_sampling_metadata_broadcastable_dict,
     _init_attn_metadata_from_tensor_dict,
     _init_sampling_metadata_from_tensor_dict)
+import vllm.envs as envs
 
 from .profiler import Profiler
 
@@ -1255,7 +1256,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     @torch.inference_mode()
     def warmup_model(self, kv_caches: List[torch.Tensor]) -> None:
-        if os.environ.get('VLLM_SKIP_WARMUP', 'false').lower() == 'true':
+        if envs.VLLM_SKIP_WARMUP:
             logger.info("Skipping warmup...")
             return
         self.profiler.start('internal', 'warmup')

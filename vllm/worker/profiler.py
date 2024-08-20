@@ -12,6 +12,7 @@ from typing import Any, List
 
 from vllm.logger import init_logger
 from vllm.utils import get_vllm_instance_id
+import vllm.envs as envs
 
 logger = init_logger(__name__)
 
@@ -55,9 +56,7 @@ class Profiler:
     event_cache: List[Any] = []
 
     def __init__(self):
-        self.enabled = os.getenv('VLLM_PROFILER_ENABLED',
-                                 'false').lower() == 'true' and int(
-                                     os.getenv('RANK', '0')) == 0
+        self.enabled = envs.VLLM_PROFILER_ENABLED and int(os.getenv('RANK', '0')) == 0
         msg = f'Profiler enabled for: {self.vllm_instance_id}'
         logger.info(msg)
         if self.enabled:

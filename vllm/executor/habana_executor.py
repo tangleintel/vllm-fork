@@ -14,6 +14,7 @@ from vllm.sequence import ExecuteModelRequest, SamplerOutput
 from vllm.utils import (HabanaMemoryProfiler, get_distributed_init_method,
                         get_ip, get_open_port, make_async)
 from vllm.worker.worker_base import WorkerWrapperBase
+import vllm.envs as envs
 
 logger = init_logger(__name__)
 
@@ -100,15 +101,10 @@ class HabanaExecutor(ExecutorBase):
         # VLLM_HPU_LOG_STEP_GRAPH_COMPILATION_ALL - will log graph compilations per engine step, always, even if there were none # noqa:E501
         # VLLM_HPU_LOG_STEP_CPU_FALLBACKS         - will log cpu fallbacks per engine step, only when there was any # noqa:E501
         # VLLM_HPU_LOG_STEP_CPU_FALLBACKS_ALL     - will log cpu fallbacks per engine step, always, even if there were none # noqa:E501
-        log_graph_compilation_all = os.environ.get(
-            'VLLM_HPU_LOG_STEP_GRAPH_COMPILATION_ALL', '0') != '0'
-        log_graph_compilation = os.environ.get(
-            'VLLM_HPU_LOG_STEP_GRAPH_COMPILATION',
-            '0') != '0' or log_graph_compilation_all
-        log_cpu_fallbacks_all = os.environ.get(
-            'VLLM_HPU_LOG_STEP_CPU_FALLBACKS_ALL', '0') != '0'
-        log_cpu_fallbacks = os.environ.get('VLLM_HPU_LOG_STEP_CPU_FALLBACKS',
-                                           '0') != '0' or log_cpu_fallbacks_all
+        log_graph_compilation_all = envs.VLLM_HPU_LOG_STEP_GRAPH_COMPILATION_ALL
+        log_graph_compilation = envs.VLLM_HPU_LOG_STEP_GRAPH_COMPILATION or log_graph_compilation_all
+        log_cpu_fallbacks_all = envs.VLLM_HPU_LOG_STEP_CPU_FALLBACKS_ALL
+        log_cpu_fallbacks = envs.VLLM_HPU_LOG_STEP_CPU_FALLBACKS or log_cpu_fallbacks_all
         if log_graph_compilation or log_cpu_fallbacks:
             from habana_frameworks.torch.hpu.metrics import metric_localcontext
             seq_group_metadata_list = execute_model_req.seq_group_metadata_list
