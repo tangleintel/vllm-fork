@@ -84,7 +84,8 @@ def run_vllm(
     gpu_memory_utilization: float = 0.9,
     download_dir: Optional[str] = None,
     load_format: str = EngineArgs.load_format,
-    enable_delayed_sampling:bool=False, 
+    enable_delayed_sampling:bool=False,
+    weights_load_device: Optional[str] = None,
 ) -> float:
     from vllm import LLM, SamplingParams
     llm = LLM(
@@ -112,6 +113,7 @@ def run_vllm(
         num_lookahead_slots=1 if enable_delayed_sampling else None,
         use_v2_block_manager=True if enable_delayed_sampling else None,
         enable_delayed_sampling=True if enable_delayed_sampling else None,
+        weights_load_device = weights_load_device,
     )
 
     # Add the requests to the engine.
@@ -337,7 +339,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '--kv-cache-dtype',
         type=str,
-        choices=['auto', 'fp8', 'fp8_e5m2', 'fp8_e4m3'],
+        choices=['auto', 'fp8', 'fp8_e5m2', 'fp8_e4m3', 'fp8_inc'],
         default="auto",
         help='Data type for kv cache storage. If "auto", will use model '
         'data type. CUDA 11.8+ supports fp8 (=fp8_e4m3) and fp8_e5m2. '
@@ -389,6 +391,11 @@ if __name__ == "__main__":
         help='Backend to use for distributed serving. When more than 1 GPU '
         'is used, will be automatically set to "ray" if installed '
         'or "mp" (multiprocessing) otherwise.')
+    parser.add_argument("--weights-load-device",
+                        type=str,
+                        default="cpu",
+                        choices=["cuda", "neuron", "hpu", "cpu"],
+                        help='Device on which weights are loaded.')
     parser.add_argument(
         '--load-format',
         type=str,
