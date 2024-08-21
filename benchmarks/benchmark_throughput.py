@@ -1,6 +1,7 @@
 """Benchmark offline inference throughput."""
 import argparse
 import json
+import os
 import random
 import time
 from typing import List, Optional, Tuple
@@ -48,6 +49,7 @@ def sample_requests(
         prompt_len = len(prompt_token_ids)
         output_len = len(completion_token_ids
                          ) if fixed_output_len is None else fixed_output_len
+
         if prompt_len < 4 or output_len < 4:
             # Prune too short sequences.
             continue
@@ -56,6 +58,8 @@ def sample_requests(
             continue
         filtered_dataset.append((prompt, prompt_len, output_len))
 
+    print(f"input range: {min([x[1] for x in filtered_dataset])}, {max([x[1] for x in filtered_dataset])}")
+    print(f"output range: {min([x[2] for x in filtered_dataset])}, {max([x[2] for x in filtered_dataset])}")
     return filtered_dataset
 
 
@@ -80,7 +84,12 @@ def run_vllm(
     max_num_batched_tokens: int,
     gpu_memory_utilization: float = 0.9,
     download_dir: Optional[str] = None,
+    weights_load_device: Optional[str] = None,
 ) -> float:
+    max_num_seqs = int(
+        os.environ.get("VLLM_DECODE_BS_BUCKET_MAX", "128")
+    )
+
     from vllm import LLM, SamplingParams
     llm = LLM(
         model=model,
@@ -100,6 +109,12 @@ def run_vllm(
         download_dir=download_dir,
         enable_chunked_prefill=enable_chunked_prefill,
         max_num_batched_tokens=max_num_batched_tokens,
+        weights_load_device=weights_load_device,
+        block_size=128,
+        max_num_seqs=max_num_seqs,
+        num_lookahead_slots=1,
+        use_v2_block_manager=True,
+        enable_delayed_sampling=True,
     )
 
     # Add the requests to the engine.
@@ -109,10 +124,11 @@ def run_vllm(
         prompts.append(prompt)
         sampling_params.append(
             SamplingParams(
-                n=n,
-                temperature=0.0 if use_beam_search else 1.0,
-                top_p=1.0,
-                use_beam_search=use_beam_search,
+                # n=n,
+                # temperature=0.0 if use_beam_search else 1.0,
+                # top_p=1.0,
+                # use_beam_search=use_beam_search,
+                temperature=0.0,
                 ignore_eos=True,
                 max_tokens=output_len,
             ))
@@ -226,7 +242,7 @@ def main(args: argparse.Namespace):
             args.quantization_param_path, args.device,
             args.enable_prefix_caching, args.enable_chunked_prefill,
             args.max_num_batched_tokens, args.gpu_memory_utilization,
-            args.download_dir)
+            args.download_dir, args.weights_load_device)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
         elapsed_time = run_hf(requests, args.model, tokenizer, args.n,
@@ -239,8 +255,12 @@ def main(args: argparse.Namespace):
         raise ValueError(f"Unknown backend: {args.backend}")
     total_num_tokens = sum(prompt_len + output_len
                            for _, prompt_len, output_len in requests)
-    print(f"Throughput: {len(requests) / elapsed_time:.2f} requests/s, "
-          f"{total_num_tokens / elapsed_time:.2f} tokens/s")
+    gen_num_tokens = sum(output_len
+                           for _, _, output_len in requests)
+    print("prompt_len: ", [prompt_len for _, prompt_len, output_len in requests])
+    print("output_len: ", [output_len for _, prompt_len, output_len in requests])
+    print(f"Throughput: {len(requests) / elapsed_time:.2f} requests/s \n"
+          f"TPS(w/ prompts, {total_num_tokens}): {total_num_tokens / elapsed_time:.2f} tokens/s \n" f"TPS(w/o prompts, {gen_num_tokens}): {gen_num_tokens / elapsed_time:.2f} tokens/s")
 
 
 if __name__ == "__main__":
@@ -313,7 +333,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--kv-cache-dtype",
         type=str,
-        choices=["auto", "fp8"],
+        choices=["auto", "fp8", "hf8"],
         default="auto",
         help=
         'Data type for kv cache storage. If "auto", will use model data type. '
@@ -353,6 +373,11 @@ if __name__ == "__main__":
                         default=None,
                         help='directory to download and load the weights, '
                         'default to the default cache dir of huggingface')
+    parser.add_argument("--weights-load-device",
+                        type=str,
+                        default="cpu",
+                        choices=["cuda", "neuron", "hpu", "cpu"],
+                        help='Device on which weights are loaded.')
     args = parser.parse_args()
     if args.tokenizer is None:
         args.tokenizer = args.model
@@ -385,3 +410,6 @@ if __name__ == "__main__":
             raise ValueError("Tokenizer must be the same as the model for MII "
                              "backend.")
     main(args)
+
+    # make sure the process will be closed, workaround for deadlock
+    os._exit(0)
