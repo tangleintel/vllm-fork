@@ -6,6 +6,7 @@ import time
 from typing import List, Optional, Tuple
 
 import torch
+import os
 from tqdm import tqdm
 from transformers import (AutoModelForCausalLM, AutoTokenizer,
                           PreTrainedTokenizerBase)
@@ -134,6 +135,11 @@ def run_vllm(
     start = time.perf_counter()
     llm.generate(prompts, sampling_params, use_tqdm=True)
     end = time.perf_counter()
+
+    measurement = os.getenv('QUANT_CONFIG', None)
+    if measurement is not None and 'measure.json' in measurement and quantization == 'inc':
+        llm.finish_measurements()
+        print("finish measurement")
     return end - start
 
 

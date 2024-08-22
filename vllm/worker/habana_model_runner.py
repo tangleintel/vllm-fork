@@ -187,7 +187,7 @@ class HpuModelAdapter():
         mask = mask >= metadata.block_usage.unsqueeze(-1)
         attn_bias = (torch.zeros_like(mask, dtype=dtype)
                         .masked_fill_(mask, -math.inf))
-        block_mapping = torch.nn.functional.one_hot(metadata.block_mapping, num_classes=batch_size).to(dtype)
+        block_mapping = torch.nn.functional.one_hot(metadata.block_mapping.to(torch.long), num_classes=batch_size).to(dtype)
         metadata = metadata._replace(block_mapping=block_mapping, attn_bias=attn_bias)
         return metadata
 
