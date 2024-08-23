@@ -849,7 +849,7 @@ class SchedulerConfig:
                 "be greater than or equal to max_num_seqs "
                 f"({self.max_num_seqs}).")
 
-        if self.num_lookahead_slots < 0:
+        if self.num_lookahead_slots  and self.num_lookahead_slots < 0:
             raise ValueError(
                 "num_lookahead_slots "
                 f"({self.num_lookahead_slots}) must be greater than or "
