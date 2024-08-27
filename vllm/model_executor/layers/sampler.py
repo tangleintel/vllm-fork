@@ -3,7 +3,7 @@ import itertools
 import math
 from math import inf
 from typing import Dict, List, Optional, Tuple
-
+import os
 import torch
 import torch.nn as nn
 
@@ -293,7 +293,19 @@ class ApplyToppTopkScalar():
         vals.masked_fill_(top_k_mask, -float("inf"))
 
         probs_sort = vals.softmax(dim=-1)
-        probs_sum = probs_sort.cumsum(dim=-1)
+        #breakpoint()
+        mode = int(os.environ.get('CUMSUM_MODE', '0'))
+        if mode == 0:
+            probs_sum = probs_sort.cumsum(dim=-1)
+        elif mode == 1:
+            pad_amount = probs_sort.shape[1] - 1
+            probs_sort_padded = torch.nn.functional.pad(probs_sort, (pad_amount, 0)) # padding may be expensive
+            probs_sum = torch.nn.functional.conv1d(probs_sort_padded.unsqueeze(1), torch.ones([1,1,probs_sort.shape[1]], device=probs_sort.device, dtype=probs_sort_padded.dtype)).squeeze()
+        elif mode == 2:
+            mask1 = torch.ones(probs_sort.shape[0], probs_sort.shape[1], probs_sort.shape[1]).tril().to(probs_sort.device) #torch.tensor([[[1,0,0],[1,1,0],[1,1,1]], [[1,0,0],[1,1,0],[1,1,1]]])
+            probs_sum = torch.sum(probs_sort.unsqueeze(1)*mask1,2)
+        else:
+            assert False
         top_p_mask = probs_sum <= (1 - p)
         top_p_mask[:, -1] = False
         vals.masked_fill_(top_p_mask, -float("inf"))
@@ -302,7 +314,6 @@ class ApplyToppTopkScalar():
                                 -float("inf"),
                                 device=logits.device)
         new_logits.scatter_(1, idx, vals.to(new_logits.dtype))
-
         return new_logits
 
 

@@ -116,8 +116,9 @@ def run_vllm(
         sampling_params.append(
             SamplingParams(
                 n=n,
-                temperature=0.0 if use_beam_search else 1.0,
-                top_p=1.0,
+                temperature=1.0,# if use_beam_search else 1.0,
+                top_p=0.98,
+                top_k=20,
                 use_beam_search=use_beam_search,
                 ignore_eos=True,
                 max_tokens=output_len,
