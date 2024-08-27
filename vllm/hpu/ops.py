@@ -193,7 +193,44 @@ def prompt_attention(
     return attn_weights
 
 
-def dispatch_bgmv_linear(
+def dispatch_bgmv_hpu(
+    y: torch.Tensor,
+    x: torch.Tensor,
+    w_t_all: torch.Tensor,
+    indices: torch.LongTensor,
+    layer_idx: int,
+    scale: float,
+):
+    """
+    `w_t_all` contains all LoRA A weight matrices stacked into a single tensor
+    assuming same rank. HPU handles no-LoRA requests using zero valued tensor.
+    This zero valued tensor is appended at the end of `w_t_all` during
+    initialization. For custom BGMV, the corresponding w for each batch is
+    created based on the lora_index of the sample.
+
+    For example:
+        `w_t_all` is tensor of shape (num_loras, num_layers, lora_rank,
+        hidden_dim), where `w_t_all[-1]` is zero valued tensor which handles
+        no-LoRA case. The wa tensor for a batch of size batch_Size will have a
+        shape of (batch_size, num_layers, lora_rank, hidden_dim)
+
+
+    This method avoids for-loop as well as graph breaks.
+    """
+
+    assert layer_idx == 0, f'layer_idx should be 0, but got {layer_idx}'
+    max_loras = w_t_all.size(0)
+    # Wrap-around for negative indices
+    indices = indices % max_loras
+
+    w = torch.index_select(w_t_all, 0, indices)[:, 0, :, :].transpose(-1, -2)
+    x = x.unsqueeze(1)
+    out = x @ w
+    out = out.squeeze(1)
+    y += out * scale
+
+
+def add_lora_hpu(
     y: torch.Tensor,
     x: torch.Tensor,
     wa_t_all: torch.Tensor,
@@ -202,67 +239,7 @@ def dispatch_bgmv_linear(
     layer_idx: int,
     scale: float,
 ):
-    """
-    `wa_t_all` and `wb_t_all` contains all LoRA A and LoRA B weight matrices
-    stacked into single tensors, assuming same rank. HPU handles no-LoRA
-    requests using zero valued A and B tensors. These zero valued tensors are
-    appended at the end of `wa_t_all` and `wb_t_all` during initialization. For
-    custom BGMV, the corresponding `wa` and `wb` for each batch is created
-    based on the lora_index of each sample.
-
-    For example:
-        `wa_t_all` is tensor of shape (num_loras, num_layers, lora_rank,
-        hidden_dim), where `wa_t_all[-1]` is zero valued tensor which handles
-        no-LoRA case. The `wa` tensor for a batch of size batch_Size will have
-        a shape of (batch_size, num_layers, hidden_dim, lora_rank)
-
-    This method avoids for-loop as well as graph breaks.
-    """
-    assert layer_idx == 0, f'layer_idx should be 0, but got {layer_idx}'
-    max_loras = wa_t_all.size(0)
-    # Wrap-around for negative indices
-    indices = indices % max_loras
-    wa = torch.index_select(wa_t_all, 0, indices)[:, 0, :, :].transpose(-1, -2)
-    wb = torch.index_select(wb_t_all, 0, indices)[:, 0, :, :].transpose(-1, -2)
-
-    x = x.unsqueeze(1)
-    out = x @ wa
-    out = out @ wb
-    out = out.squeeze(1)
-    y += out * scale
-
-
-def dispatch_bgmv_embedding(
-    y: torch.Tensor,
-    x: torch.Tensor,
-    wa_t_all: torch.Tensor,
-    indices: torch.LongTensor,
-    layer_idx: int,
-    scale: float,
-):
-    """
-    `wa_t_all` contains all LoRA A weight matrices stacked into a single tensor
-    assuming same rank. HPU handles no-LoRA requests using zero valued A
-    tensor. This zero valued tensor is appended at the end of `wa_t_all` during
-    initialization. For custom BGMV, the corresponding wa for each batch is
-    created based on the lora_index of the sample.
-
-    For example:
-        `wa_t_all` is tensor of shape (num_loras, num_layers, lora_rank,
-        hidden_dim), where `wa_t_all[-1]` is zero valued tensor which handles
-        no-LoRA case. The wa tensor for a batch of size batch_Size will have a
-        shape of (batch_size, num_layers, lora_rank, hidden_dim)
-
-
-    This method avoids for-loop as well as graph breaks.
-    """
-    assert layer_idx == 0, f'layer_idx should be 0, but got {layer_idx}'
-    max_loras = wa_t_all.size(0)
-    # Wrap-around for negative indices
-    indices = indices % max_loras
-    wa = torch.index_select(wa_t_all, 0, indices)[:, 0, :, :].transpose(-1, -2)
-
-    x = x.unsqueeze(1)
-    out = x @ wa
-    out = out.squeeze(1)
-    y += out * scale
+    r = wb_t_all.size(-1)
+    buffer = torch.zeros((x.size(0), r), dtype=x.dtype, device=x.device)
+    dispatch_bgmv_hpu(buffer, x, wa_t_all, indices, layer_idx, 1.0)
+    dispatch_bgmv_hpu(y, buffer, wb_t_all, indices, layer_idx, scale)
