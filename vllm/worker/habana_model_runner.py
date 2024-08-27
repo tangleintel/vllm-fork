@@ -576,8 +576,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         logger.info(msg)
 
         msg = (f"Omitted {len(prompt_omitted_buckets)} "
-               "prompt buckets due to exceeded "
-               f"token budget ({self.max_num_batched_tokens})")
+               "prompt buckets due to exceeded token budget "
+               f"(max_num_batched_tokens={self.max_num_batched_tokens})")
         logger.info(msg)
 
         msg = f"Omitted prompt buckets: {list(sorted(prompt_omitted_buckets))}"
@@ -600,8 +600,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         logger.info(msg)
 
         msg = (f"Omitted {len(decode_omitted_buckets)} "
-               "decode buckets due to exceeded "
-               f"token budget ({self.max_num_batched_tokens})")
+               "decode buckets due to exceeded token budget "
+               f"(max_num_batched_tokens={self.max_num_batched_tokens})")
         logger.info(msg)
 
         msg = f"Omitted decode buckets: {list(sorted(decode_omitted_buckets))}"
