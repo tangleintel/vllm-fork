@@ -6,19 +6,8 @@ import torch.nn as nn
 
 from vllm.logger import init_logger
 from vllm.model_executor.custom_op import CustomOp
-from vllm.utils import is_hpu
 
 logger = init_logger(__name__)
-if is_hpu():
-    try:
-        from habana_frameworks.torch.hpex.normalization import (FusedRMSNorm as
-                                                                HPUFusedRMSNorm
-                                                                )
-    except ImportError:
-        logger.warning(
-            "Could not import HPU FusedRMSNorm kernel. "
-            "vLLM will use forward_native implementation of RMSNorm.")
-        HPUFusedRMSNorm = None
 
 
 class RMSNorm(CustomOp):
@@ -86,21 +75,19 @@ class RMSNorm(CustomOp):
         x: torch.Tensor,
         residual: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        from vllm.hpu.ops import HPUFusedRMSNorm
         if HPUFusedRMSNorm is None:
             return self.forward_native(x, residual)
         if residual is not None:
-            orig_dtype = x.dtype
             orig_shape = x.shape
             residual += x.view(residual.shape)
             # Note: HPUFusedRMSNorm requires 3D tensors as inputs
-            x = HPUFusedRMSNorm.apply(residual.float(), self.weight.float(),
+            x = HPUFusedRMSNorm.apply(residual, self.weight,
                                       self.variance_epsilon)
-            return x.to(orig_dtype).view(orig_shape), residual
+            return x.view(orig_shape), residual
 
-        orig_dtype = x.dtype
-        x = HPUFusedRMSNorm.apply(x.float(), self.weight.float(),
-                                  self.variance_epsilon)
-        return x.to(orig_dtype)
+        x = HPUFusedRMSNorm.apply(x, self.weight, self.variance_epsilon)
+        return x
 
     def forward_xpu(
         self,
