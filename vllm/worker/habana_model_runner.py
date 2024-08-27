@@ -96,28 +96,32 @@ def warmup_range(config: Tuple[int, int, int]):
 
 
 def warmup_range_with_limit(config: Tuple[int, int, int, int], fill=True):
-    """
-    NOTE(kzawora): we'll use exponential spacing for buckets in which scaled power will return 
-    bmin for first bucket iteration, and bmax for last iteration, with elements between determined 
-    by the exponent, and base being unchanged. Note that after padding to bstep, duplicates may occur. 
+    """ 
+    NOTE(kzawora): we'll use exponential spacing for buckets in which scaled 
+    power will return bmin for first bucket iteration, and bmax for last 
+    iteration, with elements between determined by the exponent, and base being 
+    unchanged. Note that after padding to bstep, duplicates may occur. 
     Handling of duplicates is configured by fill parameter. 
 
     If fill is False, duplicates are removed and less buckets are returned. 
     
-    If fill is True, duplicates are resolved by selecting the closest (larger or smaller) 
-    bucket. If duplicate resolution is not possible, less buckets are returned. In that case, 
-    buckets are guaranteed to be linearly spaced.
+    If fill is True, duplicates are resolved by selecting the closest (larger 
+    or smaller) bucket. If duplicate resolution is not possible, less buckets 
+    are returned. In that case, buckets are guaranteed to be linearly spaced.
 
     Example (bmin=128, bstep=128, bmax=2048, num_buckets=10):
 
-    There are 16 possible buckets (2048/128), and we'll attempt to select 10 of them with exponential spacing.
-    base = (bmax/bmin) ** (1/(num_buckets-1)); (2048/128) ** (1/9) = 1.36079 in this example
+    There are 16 possible buckets (2048/128), and we'll attempt to select 10 of 
+    them with exponential spacing.
+    base = (bmax/bmin) ** (1/(num_buckets-1)); (2048/128) ** (1/9) = 1.36079
     exponent = i
     power = base ** exponent
     scaled_power = b_min * power
 
-    For i == 0 (first bucket), power is 1.36079 ** 0 = 1; scaled_power is 1 * 128 = 128 (==bmin)
-    For i == 9 (last bucket), power is 1.36079 ** 9 = 16; scaled_power is 16 * 128 = 2048 (==bmax)
+    For i == 0 (first bucket), power is 1.36079 ** 0 = 1; 
+        scaled_power is 1 * 128 = 128 (==bmin)
+    For i == 9 (last bucket), power is 1.36079 ** 9 = 16; 
+        scaled_power is 16 * 128 = 2048 (==bmax)
 
     So, computing for all buckets:
     scaled_powers_unpadded     = [bmin*base^0(==bmin), bmin*base^1, bmin*base^2,       ...,     bmin*base^9(==bmax)]
@@ -139,45 +143,55 @@ def warmup_range_with_limit(config: Tuple[int, int, int, int], fill=True):
                                                       ^_______^_______^_______^ 
                                                    closest unused buckets selected
                                                               ^_______^_______^ 
-                                      these become duplicates once previous duplicates are resolved 
+                                      these become duplicates once previous duplicates are resolved
         
         In this case we'll have four duplicated buckets:
 
         174.18 -> 256, optimal bucket,
-        237.02 -> (256) -> 384, taking closest available bucket, as optimal bucket 256 was already captured by 174.18, 
-        322.54 -> (384) -> 512, taking closest available bucket, as optimal bucket 384 was already captured by 237.02,
-        438.91 -> (512) -> 640, taking closest available bucket, as optimal bucket 512 was already captured by 322.54,
-        597.26 -> (640) -> 768, taking closest available bucket, as optimal bucket 640 was already captured by 438.91,
+        237.02 -> (256) -> 384, taking closest available bucket, 
+            as optimal bucket 256 was already captured by 174.18, 
+        322.54 -> (384) -> 512, taking closest available bucket, 
+            as optimal bucket 384 was already captured by 237.02,
+        438.91 -> (512) -> 640, taking closest available bucket, 
+            as optimal bucket 512 was already captured by 322.54,
+        597.26 -> (640) -> 768, taking closest available bucket, 
+            as optimal bucket 640 was already captured by 438.91,
         812.75 -> 896, optimal bucket
 
         len(buckets) = 10, num_buckets = 10
 
-        In this case, the end result has the same buckets as fill=False, but with additional bucket 768 added. 
-        The difference is more pronounced for larger ranges and larger number of buckets.
+        In this case, the end result has the same buckets as fill=False, 
+        but with additional bucket 768 added. 
+        The difference is more pronounced for larger ranges and larger number 
+        of buckets.
 
-    """
+    """ # noqa: E501
 
     bmin, bstep, bmax, num_buckets = config
-    linear_buckets = set(np.arange(bmin, bmax+1, step=bstep))
+    linear_buckets = set(np.arange(bmin, bmax + 1, step=bstep))
     print(len(linear_buckets))
     assert num_buckets > 0, "num_buckets must be a positive integer"
     if num_buckets == 1:
         return [bmax]
-    buckets = set()
+    buckets: Set[Tuple[int, int]] = set()
     for i in range(num_buckets):
-        power_unpadded = bmin * np.float_power(bmax/bmin, (1./float(num_buckets - 1))*i)
-        bucket = math.ceil(power_unpadded/bstep) * bstep
+        power_unpadded = bmin * np.float_power(
+            bmax / bmin, (1. / float(num_buckets - 1)) * i)
+        bucket = math.ceil(power_unpadded / bstep) * bstep
         if fill and bucket in buckets:
             available_buckets = linear_buckets.difference(buckets)
             if len(available_buckets) == 0:
-                break # no point in continuing if there are no more unique buckets
-            new_bucket = min(available_buckets, key=lambda x:abs(x-power_unpadded))
+                break  # there are no more unique buckets, let's exit now
+            new_bucket = min(available_buckets,
+                             key=lambda x: abs(x - power_unpadded))
             buckets.add(new_bucket)
         else:
             buckets.add(bucket)
     return list(sorted(buckets))
 
-def warmup_buckets(bs_bucket_config, seq_bucket_config):
+
+def warmup_buckets(bs_bucket_config, seq_bucket_config, max_num_batched_tokens,
+                   block_size):
     bs_buckets = warmup_range(bs_bucket_config[:3])
     seq_len_buckets = warmup_range(seq_bucket_config[:3])
     if bs_bucket_config[3] != 0 and len(bs_buckets) > bs_bucket_config[3]:
@@ -185,9 +199,19 @@ def warmup_buckets(bs_bucket_config, seq_bucket_config):
     if seq_bucket_config[3] != 0 and len(
             seq_len_buckets) > seq_bucket_config[3]:
         seq_len_buckets = warmup_range_with_limit(seq_bucket_config)
-
-    buckets = itertools.product(bs_buckets, seq_len_buckets)
-    return list(sorted(buckets, key=lambda b: (b[0] * b[1], b[1], b[0])))
+    diagonal_buckets = [
+        (bs,
+         math.ceil(max_num_batched_tokens / (bs * block_size)) * block_size)
+        for bs in bs_buckets
+    ]
+    print(diagonal_buckets)
+    buckets = list(itertools.product(bs_buckets, seq_len_buckets))
+    buckets = list(set([*buckets, *diagonal_buckets]))
+    filtered_buckets = filter(
+        lambda bucket: bucket[0] * bucket[1] <= math.ceil(
+            max_num_batched_tokens / block_size) * block_size, buckets)
+    return list(
+        sorted(filtered_buckets, key=lambda b: (b[0] * b[1], b[1], b[0])))
 
 
 def next_pow2(value: int):
@@ -592,18 +616,20 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                                          step=128,
                                                          max=self.max_num_seqs,
                                                          limit=0)
-        self.prompt_seq_bucket_cfg = read_bucket_settings('prompt',
-                                                          'seq',
-                                                          min=self.block_size,
-                                                          step=self.block_size,
-                                                          max=1024,
-                                                          limit=0)
-        self.decode_seq_bucket_cfg = read_bucket_settings('decode',
-                                                          'seq',
-                                                          min=self.block_size,
-                                                          step=self.block_size,
-                                                          max=2048,
-                                                          limit=0)
+        self.prompt_seq_bucket_cfg = read_bucket_settings(
+            'prompt',
+            'seq',
+            min=self.block_size,
+            step=self.block_size,
+            max=self.max_model_len,
+            limit=0)
+        self.decode_seq_bucket_cfg = read_bucket_settings(
+            'decode',
+            'seq',
+            min=self.block_size,
+            step=self.block_size,
+            max=self.max_model_len,
+            limit=0)
         self.graphed_buckets: Set[Any] = set()
 
         msg = ("Prompt bucket config (min, step, max_warmup, limit) "
@@ -611,7 +637,9 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                f"seq:{self.prompt_seq_bucket_cfg}")
         logger.info(msg)
         self.prompt_buckets = warmup_buckets(self.prompt_bs_bucket_cfg,
-                                             self.prompt_seq_bucket_cfg)
+                                             self.prompt_seq_bucket_cfg,
+                                             self.max_num_batched_tokens,
+                                             self.block_size)
 
         if self.lora_config:
             self.prompt_buckets[:] = [
@@ -628,7 +656,9 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                f"seq:{self.decode_seq_bucket_cfg}")
         logger.info(msg)
         self.decode_buckets = warmup_buckets(self.decode_bs_bucket_cfg,
-                                             self.decode_seq_bucket_cfg)
+                                             self.decode_seq_bucket_cfg,
+                                             self.max_num_batched_tokens,
+                                             self.block_size)
         if self.lora_config:
             self.decode_buckets[:] = [
                 bucket for bucket in self.decode_buckets
@@ -1173,16 +1203,30 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def profile_run(self) -> None:
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         kv_caches = [None] * num_layers
-        max_batch_size = self.prompt_bs_bucket_cfg[-2]
-        max_seq_len = self.prompt_seq_bucket_cfg[-2]
-        if self.lora_config:
-            max_seq_len = self.max_num_batched_tokens // max_batch_size
 
-        self.warmup_scenario(max_batch_size,
-                             max_seq_len,
-                             True,
-                             kv_caches,
-                             is_profile_run=True)
+        # take two largest buckets in terms of token counts
+        # first with largest batch size, second with largest seq length
+        # if both are the same, only single warmup run is executed
+        warmup_scenarios = set()
+        warmup_scenarios.add(
+            max(self.prompt_buckets,
+                key=lambda item: (item[0], item[0] * item[1])))
+        warmup_scenarios.add(
+            max(self.prompt_buckets,
+                key=lambda item: (item[1], item[0] * item[1])))
+        for idx, (max_batch_size, max_seq_len) in enumerate(warmup_scenarios):
+            msg = (f'[{idx+1}/{len(warmup_scenarios)}] '
+                   f'Executing profile run for bs={max_batch_size}, '
+                   f'seq_len={max_seq_len}, '
+                   f'num_batched_tokens={max_batch_size*max_seq_len}')
+            logger.info(msg)
+            if self.lora_config:
+                max_seq_len = self.max_num_batched_tokens // max_batch_size
+            self.warmup_scenario(max_batch_size,
+                                 max_seq_len,
+                                 True,
+                                 kv_caches,
+                                 is_profile_run=True)
 
     def warmup_scenario(self,
                         batch_size,
