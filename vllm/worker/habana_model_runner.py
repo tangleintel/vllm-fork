@@ -703,16 +703,37 @@ class HabanaModelRunner:
                                     dtype=torch.long,
                                     device=self.device)
 
-        blocks_used = [len(bt) for bt in block_tables]
+        #blocks_used = [len(bt) for bt in block_tables]
+        #print(block_tables)
         block_list = list(itertools.chain(*block_tables))
-        block_mapping = [[i] * bu for i, bu in enumerate(blocks_used)]
-        block_mapping = list(itertools.chain(*block_mapping))
+        max_idx = max(block_list)
+        max_blocks = max(max_idx + 1, len(block_list))
+        block_bucket_size = find_bucket(max_blocks, self.decode_block_bucket_cfg)
+        #print('MAX_BLOCKS:', max_blocks, 'BLOCK_BUCKET_SIZE:', block_bucket_size, flush=True)
 
-        last_block = [sl % self.block_size + 1 for sl in itertools.chain(*slot_mapping)]
-        block_usage = [[self.block_size] * (bu - 1) + [lb] for bu, lb in zip(blocks_used, last_block)]
-        block_usage = list(itertools.chain(*block_usage))
+        block_mapping = [None] * block_bucket_size
+        block_usage = [None] * block_bucket_size
+        for i, bt in enumerate(block_tables):
+            for b in bt:
+                if block_mapping[b] is None:
+                    block_mapping[b] = i
+                    block_usage[b] = self.block_size
+        block_mapping = [b if b is not None else 0 for b in block_mapping]
+        #print(block_mapping)
 
-        block_bucket_size = find_bucket(len(block_list), self.decode_block_bucket_cfg)
+        for bt, sl in zip(block_tables, slot_mapping):
+            block_usage[bt[-1]] = sl[-1] % self.block_size + 1
+        block_usage = [u if u is not None else 0 for u in block_usage]
+        #print(block_usage)
+
+        #block_mapping = [[i] * bu for i, bu in enumerate(blocks_used)]
+        #block_mapping = list(itertools.chain(*block_mapping))
+
+        #last_block = [sl % self.block_size + 1 for sl in itertools.chain(*slot_mapping)]
+        #block_usage = [[self.block_size] * (bu - 1) + [lb] for bu, lb in zip(blocks_used, last_block)]
+        #block_usage = list(itertools.chain(*block_usage))
+        #print(block_usage)
+
         block_list = pad_list(block_list, block_bucket_size, _PAD_SLOT_ID)
         block_mapping = pad_list(block_mapping, block_bucket_size, 0)
         block_usage = pad_list(block_usage, block_bucket_size, 0)
