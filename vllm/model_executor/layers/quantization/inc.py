@@ -1,14 +1,13 @@
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional
 
 import torch
-from torch.nn import Module
-from torch.nn.parameter import Parameter
 import torch.nn.functional as F
+from torch.nn.parameter import Parameter
 
-from vllm import _custom_ops as ops
 from vllm.logger import init_logger
+from vllm.model_executor.layers.fused_moe.layer import (
+    FusedMoE, UnquantizedFusedMoEMethod)
 from vllm.model_executor.layers.linear import LinearBase, LinearMethodBase
-from vllm.model_executor.layers.fused_moe.layer import FusedMoE, UnquantizedFusedMoEMethod
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig)
 from vllm.model_executor.utils import set_weight_attrs
@@ -56,7 +55,7 @@ class INCConfig(QuantizationConfig):
         if isinstance(layer, LinearBase):
             return INCLinearMethod(self)
         elif isinstance(layer, FusedMoE):
-           return UnquantizedFusedMoEMethod()
+            return UnquantizedFusedMoEMethod()
         return None
 
     def get_scaled_act_names(self) -> List[str]:
@@ -88,7 +87,9 @@ class INCLinearMethod(LinearMethodBase):
         quant_config: The quantization config.
     """
 
-    def __init__(self, quant_config: INCConfig, separate_bias_add: bool = False):
+    def __init__(self,
+                 quant_config: INCConfig,
+                 separate_bias_add: bool = False):
         self.separate_bias_add = separate_bias_add
         self.quant_config = quant_config
 
