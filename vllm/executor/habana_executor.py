@@ -191,7 +191,8 @@ class HabanaExecutor(ExecutorBase):
         return
 
     def shutdown(self) -> None:
-        self.driver_worker.shutdown_inc()
+        if hasattr(self, "driver_worker") and self.driver_worker is not None:
+            self.driver_worker.shutdown_inc()
 
     def __del__(self):
         self.shutdown()
