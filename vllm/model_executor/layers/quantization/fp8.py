@@ -23,6 +23,9 @@ from vllm.model_executor.layers.quantization.utils.w8a8_utils import (
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.platforms import current_platform
 from vllm.utils import print_warning_once
+if current_platform.is_hpu():
+    from vllm.hpu.ops import scaled_fp8_quant
+    ops.scaled_fp8_quant = scaled_fp8_quant
 
 ACTIVATION_SCHEMES = ["static", "dynamic"]
 
@@ -112,13 +115,18 @@ class Fp8LinearMethod(LinearMethodBase):
 
     def __init__(self, quant_config: Fp8Config):
         self.quant_config = quant_config
-        self.cutlass_fp8_supported = cutlass_fp8_supported()
 
-        # For GPUs that lack FP8 hardware support, we can leverage the Marlin
-        # kernel for fast weight-only FP8 quantization
-        capability = current_platform.get_device_capability()
-        capability = capability[0] * 10 + capability[1]
-        self.use_marlin = capability < 89
+        if torch.cuda.is_available():
+            self.cutlass_fp8_supported = cutlass_fp8_supported()
+
+            # For GPUs that lack FP8 hardware support, we can leverage the Marlin
+            # kernel for fast weight-only FP8 quantization
+            capability = current_platform.get_device_capability()
+            capability = capability[0] * 10 + capability[1]
+            self.use_marlin = capability < 89
+        else:
+            self.cutlass_fp8_supported = False
+            self.use_marlin = False
 
     def create_weights(
         self,

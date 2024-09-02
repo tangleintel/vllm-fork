@@ -11,6 +11,11 @@ import triton.language as tl
 import vllm.envs as envs
 from vllm import _custom_ops as ops
 from vllm.logger import init_logger
+from vllm.platforms import current_platform
+
+if current_platform.is_hpu():
+    from vllm.hpu.ops import scaled_fp8_quant
+    ops.scaled_fp8_quant = scaled_fp8_quant
 
 logger = init_logger(__name__)
 
