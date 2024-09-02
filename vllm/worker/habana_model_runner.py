@@ -406,6 +406,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         is_driver_worker: bool = False,
         multimodal_config: Optional[MultiModalConfig] = None,
     ):
+        self.bucket_hashes = {}
+        self.bucket_hash_details = {}
         self.model_config = model_config
         self.parallel_config = parallel_config
         self.scheduler_config = scheduler_config
@@ -1600,10 +1602,8 @@ class HabanaModelRunner(
             execute_model_kwargs.update(multi_modal_input)
         if htorch.utils.internal.is_lazy():
             execute_model_kwargs.update({
-                "bypass_hpu_graphs": not use_graphs,
-                "warmup_mode": warmup_mode
+                "bypass_hpu_graphs": not use_graphs
             })
-
         htorch.core.mark_step()
         if self.is_driver_worker:
             model_event_name = ("model_"
@@ -1613,10 +1613,55 @@ class HabanaModelRunner(
                                 f"graphs{'T' if use_graphs else 'F'}")
         else:
             model_event_name = 'model_executable'
+        execute_model_kwargs = {**execute_model_kwargs, 
+                                'selected_token_indices': sampling_metadata.selected_token_indices}
+
+        if htorch.utils.internal.is_lazy():
+            def isinstance_namedtuple(obj) -> bool:
+                return (
+                        isinstance(obj, tuple) and
+                        hasattr(obj, '_asdict') and
+                        hasattr(obj, '_fields')
+                )   
+            from collections.abc import MutableMapping
+
+            def flatten(dictionary, parent_key='', separator='_'):
+                items = []
+                for key, value in dictionary.items():
+                    new_key = parent_key + separator + key if parent_key else key
+                    if isinstance(value, MutableMapping):
+                        items.extend(flatten(value, new_key, separator=separator).items())
+                    else:
+                        items.append((new_key, value))
+                return dict(items)
+
+            def my_hash(obj):
+                if isinstance(obj, dict):
+                    return {key:my_hash(value) for key, value in obj.items()}
+                if isinstance_namedtuple(obj):
+                    return {key:my_hash(value) for key, value in obj._asdict().items()}
+                return torch.hpu.graphs.input_hash(obj)
+            reduced_kwargs = execute_model_kwargs
+            del reduced_kwargs['bypass_hpu_graphs']
+            kwargs_hash = torch.hpu.graphs.input_hash(reduced_kwargs)
+            kwargs_hash_details = my_hash(reduced_kwargs)
+            bucket_key = (batch_size, seq_len, is_prompt)
+            if bucket_key not in self.bucket_hashes and warmup_mode:
+                self.bucket_hashes[bucket_key] = [kwargs_hash]
+                self.bucket_hash_details[bucket_key] = [kwargs_hash_details]
+                logger.info(f'Registering bucket {bucket_key} inputs with hash {kwargs_hash} ')
+            elif bucket_key in self.bucket_hashes and kwargs_hash not in self.bucket_hashes[bucket_key]:
+                logger.error(f"Mismatched hashes for bucket {bucket_key}, len_bucket_hashes={len(self.bucket_hashes[bucket_key])}. Expected one of: {self.bucket_hashes[bucket_key]}; Actual: {kwargs_hash}")
+                offending_items = flatten(kwargs_hash_details).items() ^ flatten(self.bucket_hash_details[bucket_key][0]).items()
+                logger.error(f"Offending items: {offending_items}")
+                self.bucket_hashes[bucket_key].append(kwargs_hash)       
+            elif bucket_key in self.bucket_hashes and kwargs_hash in self.bucket_hashes[bucket_key]:
+                logger.debug(f"Bucket {bucket_key} hash matches correctly: {kwargs_hash}, len_bucket_hashes={len(self.bucket_hashes[bucket_key])}")
+            else:
+                logger.critical('what is going on?')
+    
         with self.profiler.record_event('internal', model_event_name):
-            hidden_states = self.model.forward(
-                **execute_model_kwargs,
-                selected_token_indices=sampling_metadata.selected_token_indices
+            hidden_states = self.model.forward(                **execute_model_kwargs,
             )
 
         if self.lora_config:
