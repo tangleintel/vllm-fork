@@ -16,6 +16,7 @@ from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
 
 import habana_frameworks.torch as htorch
 import torch
+from neural_compressor.torch.quantization import finalize_calibration
 
 from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
@@ -1557,7 +1558,6 @@ class HabanaModelRunner(
                                    virtual_engine=virtual_engine)
 
     def finish_measurements(self):
-        from neural_compressor.torch.quantization import finalize_calibration
         finalize_calibration(self.model.model)
 
     @torch.inference_mode()
@@ -1680,9 +1680,7 @@ class HabanaModelRunner(
         if (model_config := getattr(self, "model_config", None)) and \
                          getattr(model_config, "quantization", None) == 'inc':
             print('inc shutdown start')
-            from neural_compressor.torch.quantization import (
-                finalize_calibration)
-            finalize_calibration(self.model.model)
+            #finalize_calibration(self.model.model)
             print('inc shutdown')
 
     def __del__(self):
