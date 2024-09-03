@@ -1680,7 +1680,7 @@ class HabanaModelRunner(
         if (model_config := getattr(self, "model_config", None)) and \
                          getattr(model_config, "quantization", None) == 'inc':
             print('inc shutdown start')
-            #finalize_calibration(self.model.model)
+            finalize_calibration(self.model.model)
             print('inc shutdown')
 
     def __del__(self):
