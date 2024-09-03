@@ -54,6 +54,7 @@ from vllm.utils import is_hip
 
 from .interfaces import SupportsLoRA
 from .utils import PPMissingLayer, is_pp_missing_parameter, make_layers
+
 if current_platform.is_hpu():
     import habana_frameworks.torch.core as htcore
 
