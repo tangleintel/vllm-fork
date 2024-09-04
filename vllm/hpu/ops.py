@@ -289,6 +289,5 @@ class StaticFusedMOE(torch.nn.Module):
             w_output = silu_and_mul(w_output)
             w_output = self.w2_list[expert_idx].calc(w_output, expert_idx, w2)
             final_hidden_states += w_output * padded_weight
-            htorch.core.mark_step()
 
         return final_hidden_states.view(-1, D)
