@@ -178,6 +178,9 @@ class MixtralAttention(nn.Module):
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
         q, k = self.rotary_emb(positions, q, k)
         attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
+
+        #torch.save(attn_output.to('cpu'), 'input.pt')
+        #torch.save(self.o_proj.state_dict(), 'weight.pt')
         output, _ = self.o_proj(attn_output)
         return output
 
@@ -292,6 +295,7 @@ class MixtralModel(nn.Module):
             assert intermediate_tensors is not None
             hidden_states = intermediate_tensors["hidden_states"]
             residual = intermediate_tensors["residual"]
+
         for i in range(self.start_layer, self.end_layer):
             layer = self.layers[i]
             hidden_states, residual = layer(positions, hidden_states,

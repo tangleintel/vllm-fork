@@ -84,6 +84,8 @@ def run_vllm(
     gpu_memory_utilization: float = 0.9,
     download_dir: Optional[str] = None,
     load_format: str = EngineArgs.load_format,
+    max_num_seqs: int = 256,
+    weights_load_device: str = 'cpu'
 ) -> float:
     from vllm import LLM, SamplingParams
     llm = LLM(
@@ -106,6 +108,8 @@ def run_vllm(
         max_num_batched_tokens=max_num_batched_tokens,
         distributed_executor_backend=distributed_executor_backend,
         load_format=load_format,
+        max_num_seqs=max_num_seqs,
+        weights_load_device=weights_load_device,
     )
 
     # Add the requests to the engine.
@@ -232,7 +236,8 @@ def main(args: argparse.Namespace):
             args.quantization_param_path, args.device,
             args.enable_prefix_caching, args.enable_chunked_prefill,
             args.max_num_batched_tokens, args.distributed_executor_backend,
-            args.gpu_memory_utilization, args.download_dir, args.load_format)
+            args.gpu_memory_utilization, args.download_dir, args.load_format, args.max_num_seqs,
+            args.weights_load_device)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
         elapsed_time = run_hf(requests, args.model, tokenizer, args.n,
@@ -311,6 +316,11 @@ if __name__ == "__main__":
         help='Maximum length of a sequence (including prompt and output). '
         'If None, will be derived from the model.')
     parser.add_argument(
+        '--weights-load-device',
+        type=str,
+        default='cpu',
+        help='Device on which weights are loaded.')
+    parser.add_argument(
         '--dtype',
         type=str,
         default='auto',
@@ -331,7 +341,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '--kv-cache-dtype',
         type=str,
-        choices=['auto', 'fp8', 'fp8_e5m2', 'fp8_e4m3'],
+        choices=['auto', 'fp8', 'fp8_e5m2', 'fp8_e4m3', 'fp8_inc'],
         default="auto",
         help='Data type for kv cache storage. If "auto", will use model '
         'data type. CUDA 11.8+ supports fp8 (=fp8_e4m3) and fp8_e5m2. '
@@ -365,6 +375,10 @@ if __name__ == "__main__":
                         default=None,
                         help='maximum number of batched tokens per '
                         'iteration')
+    parser.add_argument('--max-num-seqs',
+                        type=int,
+                        default=None,
+                        help='maximum number of requests, bs')
     parser.add_argument('--download-dir',
                         type=str,
                         default=None,
