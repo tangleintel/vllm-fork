@@ -62,7 +62,9 @@ class SchedulingBudget:
                      is_prefill: bool):
         assert num_new_tokens != 0
         assert num_new_seqs != 0
-        is_over_max_seqs = self._num_curr_prefill_seqs + num_new_seqs <= self.max_num_prefill_seqs if is_prefill else self.num_curr_seqs + num_new_seqs <= self.max_num_seqs
+        is_over_max_seqs = self._num_curr_prefill_seqs + num_new_seqs \
+            <= self.max_num_prefill_seqs if is_prefill else \
+                self.num_curr_seqs + num_new_seqs <= self.max_num_seqs
         return (self.num_batched_tokens + num_new_tokens <= self.token_budget
                 and is_over_max_seqs)
 
@@ -461,7 +463,8 @@ class Scheduler:
                                                    num_running_tokens)
                 num_running_seqs = seq_group.get_max_num_running_seqs()
                 budget.subtract_num_seqs(seq_group.request_id,
-                                         num_running_seqs)
+                                         num_running_seqs,
+                                         is_prefill=seq_group.is_prefill())
 
                 if (curr_loras is not None and seq_group.lora_int_id > 0
                         and seq_group.lora_int_id in curr_loras):
@@ -506,7 +509,9 @@ class Scheduler:
                 # this method, so we don't have to update it again here.
                 if enable_chunking:
                     num_running_seqs = seq_group.get_max_num_running_seqs()
-                    budget.add_num_seqs(seq_group.request_id, num_running_seqs)
+                    budget.add_num_seqs(seq_group.request_id,
+                                        num_running_seqs,
+                                        is_prefill=seq_group.is_prefill())
                 if curr_loras is not None and seq_group.lora_int_id > 0:
                     curr_loras.add(seq_group.lora_int_id)
 
@@ -601,9 +606,10 @@ class Scheduler:
                                                       SequenceStatus.SWAPPED,
                                                       enable_chunking, budget)
 
-            if (num_new_tokens == 0
-                    or not budget.can_schedule(num_new_tokens=num_new_tokens,
-                                               num_new_seqs=num_new_seqs)):
+            if (num_new_tokens == 0 or not budget.can_schedule(
+                    num_new_tokens=num_new_tokens,
+                    num_new_seqs=num_new_seqs,
+                    is_prefill=seq_group.is_prefill())):
                 break
 
             if lora_int_id > 0 and curr_loras is not None:
@@ -620,7 +626,9 @@ class Scheduler:
                 decode_seq_groups.append(
                     ScheduledSequenceGroup(seq_group, token_chunk_size=1))
             budget.add_num_batched_tokens(seq_group.request_id, num_new_tokens)
-            budget.add_num_seqs(seq_group.request_id, num_new_seqs)
+            budget.add_num_seqs(seq_group.request_id,
+                                num_new_seqs,
+                                is_prefill=seq_group.is_prefill())
 
         swapped_queue.extendleft(leftover_swapped)
 
@@ -785,14 +793,14 @@ class Scheduler:
         print('created budget')
         budget = SchedulingBudget(
             token_budget=self.scheduler_config.max_num_batched_tokens,
-            max_num_seqs=self.scheduler_config.max_num_decode_seqs,
+            max_num_seqs=self.scheduler_config.max_num_seqs,
             max_num_prefill_seqs=self.scheduler_config.max_num_prefill_seqs)
         # Make sure we include num running seqs before scheduling prefill,
         # so that we don't schedule beyond max_num_seqs for prefill.
         for seq_group in self.running:
             budget.add_num_seqs(seq_group.request_id,
                                 seq_group.get_max_num_running_seqs(),
-                                is_prefill=False)
+                                is_prefill=seq_group.is_prefill())
         curr_loras = set(
             seq_group.lora_int_id for seq_group in self.running
             if seq_group.lora_int_id > 0) if self.lora_enabled else None
@@ -892,7 +900,7 @@ class Scheduler:
         budget = SchedulingBudget(
             token_budget=self.scheduler_config.max_num_batched_tokens,
             max_num_seqs=self.scheduler_config.max_num_seqs,
-        )
+            max_num_prefill_seqs=self.scheduler_config.max_num_prefill_seqs)
         curr_loras: Set[int] = set()
 
         remaining_waiting, prefills = (self.waiting,
