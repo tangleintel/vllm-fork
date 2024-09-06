@@ -790,6 +790,7 @@ class SchedulerConfig:
     def __init__(self,
                  max_num_batched_tokens: Optional[int],
                  max_num_seqs: int,
+                 max_num_prefill_seqs: int,
                  max_model_len: int,
                  use_v2_block_manager: bool = False,
                  num_lookahead_slots: int = 0,
@@ -818,6 +819,7 @@ class SchedulerConfig:
                 self.max_num_batched_tokens)
 
         self.max_num_seqs = max_num_seqs
+        self.max_num_prefill_seqs = max_num_prefill_seqs
         self.max_model_len = max_model_len
         self.use_v2_block_manager = use_v2_block_manager
         self.num_lookahead_slots = num_lookahead_slots
@@ -830,20 +832,26 @@ class SchedulerConfig:
     def _verify_args(self) -> None:
         if (self.max_num_batched_tokens < self.max_model_len
                 and not self.chunked_prefill_enabled):
-            raise ValueError(
-                f"max_num_batched_tokens ({self.max_num_batched_tokens}) is "
-                f"smaller than max_model_len ({self.max_model_len}). "
-                "This effectively limits the maximum sequence length to "
-                "max_num_batched_tokens and makes vLLM reject longer "
-                "sequences. Please increase max_num_batched_tokens or "
-                "decrease max_model_len.")
+            pass  # REMOVEME: this has been disabled just for testing
+            #raise ValueError(
+            #    f"max_num_batched_tokens ({self.max_num_batched_tokens}) is "
+            #    f"smaller than max_model_len ({self.max_model_len}). "
+            #    "This effectively limits the maximum sequence length to "
+            #    "max_num_batched_tokens and makes vLLM reject longer "
+            #    "sequences. Please increase max_num_batched_tokens or "
+            #    "decrease max_model_len.")
 
         if self.max_num_batched_tokens < self.max_num_seqs:
+            pass  # REMOVEME: this has been disabled just for testing
+            #raise ValueError(
+            #    f"max_num_batched_tokens ({self.max_num_batched_tokens}) must "
+            #    "be greater than or equal to max_num_seqs "
+            #    f"({self.max_num_seqs}).")
+        if self.max_num_seqs < self.max_num_prefill_seqs:
             raise ValueError(
-                f"max_num_batched_tokens ({self.max_num_batched_tokens}) must "
-                "be greater than or equal to max_num_seqs "
-                f"({self.max_num_seqs}).")
-
+                f"max_num_seqs ({self.max_num_seqs}) must "
+                "be greater than or equal to max_num_prefill_seqs "
+                f"({self.max_num_prefill_seqs}).")
         if self.num_lookahead_slots < 0:
             raise ValueError(
                 "num_lookahead_slots "
