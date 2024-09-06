@@ -238,7 +238,7 @@ class HpuModelAdapter():
             torch._dynamo.mark_dynamic(lora_mask, 0)
             torch._dynamo.mark_dynamic(positions, 0)
             self.model = torch.compile(self.model,
-                                       backend='hpu_backend', dynamic=False)
+                                       backend='hpu_backend')
             self.compiled_model = False
 
         kwargs['attn_metadata'] = self._set_attn_bias(kwargs['attn_metadata'],
