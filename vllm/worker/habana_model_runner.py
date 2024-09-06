@@ -196,9 +196,7 @@ class HpuModelAdapter():
                                                '0').lower() in ['1', 'true']
 
         if not htorch.utils.internal.is_lazy() and not enforce_eager:
-            self.model = torch.compile(self.model,
-                                       backend='hpu_backend',
-                                       dynamic=False)
+            self.compiled_model = True
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
                        dtype):
@@ -229,6 +227,20 @@ class HpuModelAdapter():
         if 'warmup_mode' in kwargs:
             kwargs.pop('warmup_mode')
         input_ids = kwargs['input_ids']
+        lora_mask = kwargs['lora_mask']
+        positions = kwargs['positions']
+
+        # Execute this block only once in the begining
+        if self.compiled_model:
+            # Marking 0th dimension (or batch dimension)
+            # of all input tensor as dynamic
+            torch._dynamo.mark_dynamic(input_ids, 0)
+            torch._dynamo.mark_dynamic(lora_mask, 0)
+            torch._dynamo.mark_dynamic(positions, 0)
+            self.model = torch.compile(self.model,
+                                       backend='hpu_backend', dynamic=False)
+            self.compiled_model = False
+
         kwargs['attn_metadata'] = self._set_attn_bias(kwargs['attn_metadata'],
                                                       input_ids.size(0),
                                                       input_ids.size(1),
