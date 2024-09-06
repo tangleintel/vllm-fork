@@ -532,8 +532,6 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 htcore.mark_step()
             torch.hpu.synchronize()
 
-            # FIXME: Running with disable_tensor_cache=True causes
-            # RuntimeErrors. This needs to be debugged
             with HabanaMemoryProfiler() as m_wrap:
                 self.model = _maybe_wrap_in_hpu_graph(
                     self.model, enforce_eager=self.enforce_eager)
@@ -1510,10 +1508,9 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
 
 def _maybe_wrap_in_hpu_graph(*args, **kwargs):
-    return htorch.hpu.wrap_in_hpu_graph(HpuModelAdapter(
-        *args, **
-        kwargs)) if htorch.utils.internal.is_lazy() else HpuModelAdapter(
-            *args, **kwargs)
+    return htorch.hpu.wrap_in_hpu_graph(
+        HpuModelAdapter(*args, **kwargs), disable_tensor_cache=True
+    ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(*args, **kwargs)
 
 
 class HabanaProfilerCounterHelper():
