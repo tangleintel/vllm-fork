@@ -165,11 +165,12 @@ def generate_prompt_buckets(bs_bucket_config, seq_bucket_config):
     return list(sorted(buckets, key=lambda b: (b[0] * b[1], b[1], b[0])))
 
 
-def generate_decode_buckets(bs_bucket_config, blocks_bucket_config, max_blocks, block_size):
+def generate_decode_buckets(bs_bucket_config, blocks_bucket_config, max_blocks):
     buckets = []
     bs_buckets = warmup_range(bs_bucket_config)
     block_buckets = warmup_range(blocks_bucket_config)
-    last_bucket = max_blocks if (max_blocks // block_size == 0) else (max_blocks // block_size + 1) * block_size
+    bmin, bstep, bmax = blocks_bucket_config
+    last_bucket = max_blocks if (max_blocks // bstep == 0) else (max_blocks // bstep + 1) * bstep
     for bs in bs_buckets:
         for blocks in block_buckets:
             if blocks < bs:
@@ -1243,7 +1244,7 @@ class HabanaModelRunner:
         self.prompt_buckets = generate_prompt_buckets(self.prompt_bs_bucket_cfg, self.prompt_seq_bucket_cfg)
         logger.info(f"Generated {len(self.prompt_buckets)} prompt buckets: {list(sorted(self.prompt_buckets))}")
 
-        self.decode_buckets = generate_decode_buckets(self.decode_bs_bucket_cfg, self.decode_block_bucket_cfg, max_blocks, self.block_size)
+        self.decode_buckets = generate_decode_buckets(self.decode_bs_bucket_cfg, self.decode_block_bucket_cfg, max_blocks)
         logger.info(f"Generated {len(self.decode_buckets)} decode buckets: {list(sorted(self.decode_buckets))}")
 
         start_mem = HabanaMemoryProfiler.current_device_memory_usage()
