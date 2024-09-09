@@ -373,7 +373,7 @@ class EngineArgs:
             type=int,
             default=EngineArgs.max_num_prefill_seqs,
             help=('Maximum number of sequences per prefill iteration. '
-                  'Must be >= than max_num_seqs. '
+                  'Must be <= than max_num_seqs. '
                   'Defaults to max_num_seqs.'))
         parser.add_argument(
             '--max-logprobs',
