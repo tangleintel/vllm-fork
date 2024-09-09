@@ -1347,6 +1347,17 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     @torch.inference_mode()
     def warmup_model(self, kv_caches: List[torch.Tensor]) -> None:
+        if profile := os.environ.get('VLLM_PT_PROFILE', None):
+            phase, bs, seq_len, graphs = profile.split('_')
+            is_prompt = phase == 'prompt'
+            bs = int(bs)
+            seq_len = int(seq_len)
+            graphs = graphs == 't'
+            if graphs:
+                self.graphed_buckets.add((bs, seq_len, is_prompt))
+            self.warmup_scenario(bs, seq_len, is_prompt, kv_caches, True)
+            print("DOOOOOOOOOOOOOOONE", is_prompt, bs, seq_len, graphs)
+            assert False
         if os.environ.get('VLLM_SKIP_WARMUP', 'false').lower() == 'true':
             logger.info("Skipping warmup...")
             return
