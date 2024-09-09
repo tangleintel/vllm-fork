@@ -8,6 +8,7 @@ import gc
 import itertools
 import math
 import operator
+import sys
 import os
 import time
 from enum import IntEnum
@@ -188,22 +189,73 @@ def align_workers(value, op):
     return value_t.item()
 
 
-def pt_profiler():
-    prof_type = os.environ.get('VLLM_PT_PROFILE_METHOD', 'pt')
-    print('WE ARE IN PT PROFILER')
-    assert prof_type in ['pt']
+def setup_profiler():
+    DEVICE='hpu'
+    STEPS=3
+    activities = [torch.profiler.ProfilerActivity.CPU]
+    activities.extend([torch.profiler.ProfilerActivity.HPU] if DEVICE == 'hpu' else [])
+    wait = 0
+    active = 1
+    warmup = STEPS - active
 
-    schedule = torch.profiler.schedule(wait=0, warmup=2, active=1, repeat=1) # wait = 1
-    activities = [torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.HPU]
-
+    schedule = torch.profiler.schedule(wait=wait, warmup=warmup, active=active, repeat=1)
     profiler = torch.profiler.profile(
         schedule=schedule,
         activities=activities,
         on_trace_ready=torch.profiler.tensorboard_trace_handler('.', use_gzip=True),
         record_shapes=False,
         with_stack=True)
-    
     return profiler
+
+
+def pt_profiler(schedule):
+    DEVICE = 'hpu'
+    activities = [torch.profiler.ProfilerActivity.CPU]
+    activities.extend([torch.profiler.ProfilerActivity.HPU] if DEVICE == 'hpu' else [])
+    #from habana_frameworks.torch.activity_profiler import DebugActivity
+    #debug_activities=[DebugActivity.BRIDGE_FUNCTION_CALLS]
+
+    profiler = torch.profiler.profile(
+        schedule=schedule,
+        activities=activities,
+        #debug_activities=debug_activities,
+        on_trace_ready=torch.profiler.tensorboard_trace_handler('.', use_gzip=True),
+        record_shapes=False,
+        with_stack=True)
+    return profiler
+
+
+def hltv_profiler(schedule):
+    pt_tools_path = os.environ.get('PT_TOOLS_PATH', None)
+    assert pt_tools_path is not None, "Need to specify PT_TOOLS_PATH to use hltv profiling method"
+    sys.path.append(pt_tools_path)
+    from topologies import SynapseProfilerApi, TraceType
+    api = SynapseProfilerApi()
+    class SynapseProfiler:
+        def check(self):
+            if schedule(self.cur_step) == torch.profiler.ProfilerAction.RECORD_AND_SAVE:
+                api.profiler_start(TraceType.TraceAll, 0)
+        def start(self):
+            self.cur_step = 0
+            self.check()
+        def step(self):
+            self.cur_step = self.cur_step + 1
+            self.check()
+        def stop(self):
+            api.profiler_stop(TraceType.TraceAll, 0)
+            api.profiler_get_trace_json(TraceType.TraceAll, 0)
+    return SynapseProfiler()
+
+
+def setup_profiler():
+    prof_wait = 0
+    prof_warmup = 2
+    prof_active = 1
+    prof_type = os.environ.get('VLLM_PT_PROFILE_METHOD', 'pt')
+    assert prof_type in ['pt', 'hltv']
+    method = pt_profiler if prof_type == 'pt' else hltv_profiler
+    schedule = torch.profiler.schedule(wait=prof_wait, warmup=prof_warmup, active=prof_active, repeat=1)
+    return method(schedule)
 
 
 class HpuModelAdapter():
@@ -1177,8 +1229,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         seq_len,
                         is_prompt,
                         kv_caches,
-                        is_profile_run=False,
-                        profile=False) -> None:
+                        is_profile_run=False) -> None:
         use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
         scenario_name = ("warmup_"
                          f"{'prompt' if is_prompt else 'decode'}_"
@@ -1210,7 +1261,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     for idx in range(max_num_seqs)
                 ]
         self.profiler.start('internal', scenario_name)
-        times = 5 if use_graphs or profile else 1
+        times = 3 if use_graphs or is_profile_run else 1
         if self.lora_config and not is_profile_run:
             lora_mapping = LoRAMapping(
                 [0] * batch_size * seq_len,
@@ -1226,11 +1277,13 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 if dummy_lora_requests_per_seq else None)
             for i in range(batch_size)
         ]
+        print("HELLO?????", is_profile_run)
         torch.hpu.synchronize()
         profiler = None
-        if profile and self.is_driver_worker:
-            profiler = pt_profiler()
+        if is_profile_run and self.is_driver_worker:
+            profiler = setup_profiler()
             profiler.start()
+        self.profiler.start('internal', scenario_name)
         for i in range(times):
             print(f"Run {i}...")
             inputs = self.prepare_model_input(seqs)
@@ -1239,6 +1292,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if profiler:
                 profiler.step()
         if profiler:
+            print("STOOP")
             profiler.stop()
         self.profiler.end()
         gc.collect()
