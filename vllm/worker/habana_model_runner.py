@@ -169,7 +169,7 @@ def generate_decode_buckets(bs_bucket_config, blocks_bucket_config, max_blocks):
     buckets = []
     bs_buckets = warmup_range(bs_bucket_config)
     block_buckets = warmup_range(blocks_bucket_config)
-    last_bucket = min(block_buckets, key=lambda x: abs(x - max_blocks))
+    last_bucket = max_blocks if (max_blocks // block_size == 0) else (max_blocks // block_size + 1) * block_size
     for bs in bs_buckets:
         for blocks in block_buckets:
             if blocks < bs:
@@ -688,7 +688,7 @@ class HabanaModelRunner:
                 block_table = seq_group_metadata.block_tables[seq_id]
                 if len(block_table) == 0:
                     block_number = 0
-                    block_table = {0: []}
+                    block_table = []
                 else:
                     block_number = block_table[position // self.block_size]
                 block_offset = position % self.block_size
@@ -710,7 +710,7 @@ class HabanaModelRunner:
                                     dtype=torch.long,
                                     device=self.device)
 
-        blocks_used = [len(bt) for bt in block_tables]
+        blocks_used = [len(bt) for bt in block_tables if bt]
         block_list = list(itertools.chain(*block_tables))
         block_mapping = [[i] * bu for i, bu in enumerate(blocks_used)]
         block_mapping = list(itertools.chain(*block_mapping))
