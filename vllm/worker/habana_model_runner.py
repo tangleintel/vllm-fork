@@ -1221,8 +1221,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.warmup_scenario(max_batch_size,
                              max_seq_len,
                              True,
-                             kv_caches,
-                             is_profile_run=True)
+                             kv_caches)
 
     def warmup_scenario(self,
                         batch_size,
@@ -1277,22 +1276,19 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 if dummy_lora_requests_per_seq else None)
             for i in range(batch_size)
         ]
-        print("HELLO?????", is_profile_run)
         torch.hpu.synchronize()
         profiler = None
         if is_profile_run and self.is_driver_worker:
             profiler = setup_profiler()
             profiler.start()
         self.profiler.start('internal', scenario_name)
-        for i in range(times):
-            print(f"Run {i}...")
+        for _ in range(times):
             inputs = self.prepare_model_input(seqs)
             self.execute_model(inputs, kv_caches, warmup_mode=True)
             torch.hpu.synchronize()
             if profiler:
                 profiler.step()
         if profiler:
-            print("STOOP")
             profiler.stop()
         self.profiler.end()
         gc.collect()
@@ -1410,7 +1406,6 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             if graphs:
                 self.graphed_buckets.add((bs, seq_len, is_prompt))
             self.warmup_scenario(bs, seq_len, is_prompt, kv_caches, True)
-            print("DOOOOOOOOOOOOOOONE", is_prompt, bs, seq_len, graphs)
             assert False
         if os.environ.get('VLLM_SKIP_WARMUP', 'false').lower() == 'true':
             logger.info("Skipping warmup...")
