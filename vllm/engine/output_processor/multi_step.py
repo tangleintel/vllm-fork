@@ -85,9 +85,10 @@ class MultiStepOutputProcessor(SequenceGroupOutputProcessor):
         valid_samples = [
             sample for sample in samples if sample.output_token != -1
         ]
-        if valid_samples:
-            self._process_seq_outputs(seq, valid_samples,
-                                      sequence_group.sampling_params)
+        assert valid_samples
+
+        self._process_seq_outputs(seq, valid_samples,
+                                  sequence_group.sampling_params)
 
     def _process_seq_outputs(self, seq: Sequence,
                              valid_samples: List[SequenceOutput],
