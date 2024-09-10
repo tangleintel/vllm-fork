@@ -6,6 +6,7 @@ import time
 from typing import List, Optional, Tuple
 
 import torch
+import os
 from tqdm import tqdm
 from transformers import (AutoModelForCausalLM, AutoTokenizer,
                           PreTrainedTokenizerBase)
@@ -84,8 +85,11 @@ def run_vllm(
     gpu_memory_utilization: float = 0.9,
     download_dir: Optional[str] = None,
     load_format: str = EngineArgs.load_format,
+    enable_delayed_sampling:bool=False,
+    weights_load_device: Optional[str] = None,
 ) -> float:
     from vllm import LLM, SamplingParams
+
     llm = LLM(
         model=model,
         tokenizer=tokenizer,
@@ -106,6 +110,12 @@ def run_vllm(
         max_num_batched_tokens=max_num_batched_tokens,
         distributed_executor_backend=distributed_executor_backend,
         load_format=load_format,
+        block_size=128,
+        max_num_seqs=128,
+        num_lookahead_slots=1 if enable_delayed_sampling else 0,
+        use_v2_block_manager=True if enable_delayed_sampling else False,
+        enable_delayed_sampling=True if enable_delayed_sampling else None,
+        weights_load_device = weights_load_device,
     )
 
     # Add the requests to the engine.
@@ -124,8 +134,20 @@ def run_vllm(
             ))
 
     start = time.perf_counter()
-    llm.generate(prompts, sampling_params, use_tqdm=True)
+    outputs = llm.generate(prompts, sampling_params, use_tqdm=True)
     end = time.perf_counter()
+
+    for output in outputs:
+       print('==========')
+       print(f'TEST ACC: request id = {output.request_id}')
+       print(f'TEST ACC: prompt = {output.prompt}')
+       print(f'TEST ACC: response = {output.outputs[0].text}')
+       print('====\n\n')
+
+    measurement = os.getenv('QUANT_CONFIG', None)
+    if measurement is not None and 'measure.json' in measurement and quantization == 'inc':
+        llm.finish_measurements()
+        print("finish measurement")
     return end - start
 
 
@@ -232,7 +254,8 @@ def main(args: argparse.Namespace):
             args.quantization_param_path, args.device,
             args.enable_prefix_caching, args.enable_chunked_prefill,
             args.max_num_batched_tokens, args.distributed_executor_backend,
-            args.gpu_memory_utilization, args.download_dir, args.load_format)
+            args.gpu_memory_utilization, args.download_dir, args.load_format,
+            args.enable_delayed_sampling, args.weights_load_device)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
         elapsed_time = run_hf(requests, args.model, tokenizer, args.n,
@@ -331,7 +354,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '--kv-cache-dtype',
         type=str,
-        choices=['auto', 'fp8', 'fp8_e5m2', 'fp8_e4m3'],
+        choices=['auto', 'fp8', 'fp8_e5m2', 'fp8_e4m3', 'fp8_inc'],
         default="auto",
         help='Data type for kv cache storage. If "auto", will use model '
         'data type. CUDA 11.8+ supports fp8 (=fp8_e4m3) and fp8_e5m2. '
@@ -370,6 +393,7 @@ if __name__ == "__main__":
                         default=None,
                         help='directory to download and load the weights, '
                         'default to the default cache dir of huggingface')
+    parser.add_argument("--enable-delayed-sampling", action="store_true")
     parser.add_argument(
         '--output-json',
         type=str,
@@ -382,6 +406,11 @@ if __name__ == "__main__":
         help='Backend to use for distributed serving. When more than 1 GPU '
         'is used, will be automatically set to "ray" if installed '
         'or "mp" (multiprocessing) otherwise.')
+    parser.add_argument("--weights-load-device",
+                        type=str,
+                        default="cpu",
+                        choices=["cuda", "neuron", "hpu", "cpu"],
+                        help='Device on which weights are loaded.')
     parser.add_argument(
         '--load-format',
         type=str,

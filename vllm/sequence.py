@@ -129,7 +129,8 @@ class SequenceData:
         # The number of tokens that are computed (that run against the model).
         self._num_computed_tokens = 0
         self._stage: SequenceStage = SequenceStage.PREFILL
-
+        self.prev_logits = None
+        self.prev_logits_idx = None
         self._update_cached_all_tokens()
 
     def _update_cached_all_tokens(self):
@@ -163,10 +164,10 @@ class SequenceData:
     def output_token_ids_array(self) -> array:
         return self._output_token_ids
 
-    def append_token_id(self, token_id: int, logprob: float) -> None:
+    def append_token_id(self, token_id: int, logprob: Optional[float]) -> None:
         self._output_token_ids.append(token_id)
         self._cached_all_token_ids.append(token_id)
-        self.cumulative_logprob += logprob
+        self.cumulative_logprob += logprob if logprob is not None else 0.0
 
     def get_len(self) -> int:
         return len(self._output_token_ids) + len(self._prompt_token_ids)
@@ -338,7 +339,9 @@ class Sequence:
     ) -> None:
         assert token_id in logprobs
         self.output_logprobs.append(logprobs)
-        self.data.append_token_id(token_id, logprobs[token_id].logprob)
+        self.data.append_token_id(
+            token_id,
+            logprobs[token_id].logprob if token_id in logprobs else None)
 
     def get_len(self) -> int:
         return self.data.get_len()
