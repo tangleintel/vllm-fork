@@ -19,7 +19,7 @@ from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
 import habana_frameworks.torch as htorch
 import habana_frameworks.torch.internal.bridge_config as bc
 import torch
-
+from vllm.distributed import broadcast_tensor_dict
 from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
                          ModelConfig, MultiModalConfig, ParallelConfig,
@@ -171,11 +171,15 @@ def generate_prompt_buckets(bs_bucket_config,
 def generate_decode_buckets(bs_bucket_config, blocks_bucket_config,
                             max_blocks):
     buckets = []
-    for bs in warmup_range(bs_bucket_config):
-        for blocks in warmup_range(blocks_bucket_config):
+    bs_buckets = warmup_range(bs_bucket_config)
+    block_buckets = warmup_range(blocks_bucket_config)
+    bmin, bstep, bmax = blocks_bucket_config
+    last_bucket = max_blocks if (max_blocks // bstep == 0) else (max_blocks // bstep + 1) * bstep
+    for bs in bs_buckets:
+        for blocks in block_buckets:
             if blocks < bs:
                 continue
-            if blocks > max_blocks:
+            if blocks > last_bucket:
                 break
             buckets.append((bs, blocks))
     return list(sorted(buckets, key=lambda b: (b[0] * b[1], b[1], b[0])))
@@ -926,6 +930,11 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 seq_lens.append(seq_len)
 
                 block_table = seq_group_metadata.block_tables[seq_id]
+                if len(block_table) == 0:
+                    block_number = 0
+                    block_table = []
+                else:
+                    block_number = block_table[position // self.block_size]
                 block_number = block_table[position // self.block_size]
                 if block_number == _PAD_BLOCK_ID:
                     slot = next(dummy_slots)
@@ -954,7 +963,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         num_decode_tokens = sum(seq_lens)
 
-        blocks_used = [len(bt) for bt in block_tables]
+        blocks_used = [len(bt) for bt in block_tables if bt]
         block_list = list(itertools.chain(*block_tables))
         block_mapping_nested: List[List[int]] = [
             [i] * b_u for i, b_u in enumerate(blocks_used)
@@ -1759,7 +1768,7 @@ class HabanaModelRunner(
         if num_steps > 1:
             raise ValueError(
                 "num_steps > 1 is not supported in HabanaModelRunner")
-
+        
         if self.lora_config:
             assert model_input.lora_requests is not None
             assert model_input.lora_mapping is not None
@@ -1790,15 +1799,17 @@ class HabanaModelRunner(
             "intermediate_tensors": intermediate_tensors,
             "lora_mask": model_input.lora_mask
         }
+
         if multi_modal_input is not None:
             execute_model_kwargs.update(multi_modal_input)
         if htorch.utils.internal.is_lazy():
             execute_model_kwargs.update({"bypass_hpu_graphs": not use_graphs})
 
         htorch.core.mark_step()
-
-                # Sample the next token based on previous logits if any.
-        if self.scheduler_config.enable_delayed_sampling and not is_prompt:
+        output = None
+        input_ids = None
+        # Sample the next token based on previous logits if any.
+        if self.scheduler_config.enable_delayed_sampling and not is_prompt and self.is_driver_worker:
             logits_ids_list = []
             logits_tensor = None
             logits_tensor_list = []
@@ -1841,8 +1852,20 @@ class HabanaModelRunner(
                     logits=prev_logits,
                     sampling_metadata=sampling_metadata,
                 )
+            #TODO: check why broadcast failed for float tensor use dict instead
+            model_kwargs = { }
+            model_kwargs["input_ids"] =  output.sampled_token_ids
 
-            execute_model_kwargs["input_ids"] = output.sampled_token_ids
+            broadcast_tensor_dict(model_kwargs, src=0)
+            input_ids = output.sampled_token_ids
+
+        elif self.scheduler_config.enable_delayed_sampling and not is_prompt:
+
+            model_kwargs = broadcast_tensor_dict(src=0)
+            input_ids = model_kwargs["input_ids"]
+
+        if input_ids is not None:
+            execute_model_kwargs["input_ids"] = input_ids
             htorch.core.mark_step()
 
         if self.is_driver_worker:
@@ -1873,16 +1896,18 @@ class HabanaModelRunner(
                 lora_logits_mask.index_select(
                     0, sampling_metadata.selected_token_indices))
         
-        if self.scheduler_config.enable_delayed_sampling:
+        if self.scheduler_config.enable_delayed_sampling and self.is_driver_worker:
             if not is_prompt:
                 htorch.core.mark_step()
                 # Only after dispatching next model.forward() read and update
                 # the previous token ids to return
                 sampled_token_ids = output.sampled_token_ids.tolist()
+                i = 0 
                 for seq_group_output in output.outputs[:real_batch_size]:
                     for sample in seq_group_output.samples:
-                        sample.output_token = sampled_token_ids[
-                            sample.output_token][0]
+                        #sample.output_token = sampled_token_ids[sample.output_token][0]
+                        sample.output_token = sampled_token_ids[i][0]
+                    i = i + 1
                 output = output
             else:
                 # For prompts compose empty output
@@ -1921,7 +1946,7 @@ class HabanaModelRunner(
             logits = self.model.compute_logits(hidden_states,
                                                sampling_metadata)
 
-        if (self.scheduler_config.enable_delayed_sampling
+        if (self.is_driver_worker and self.scheduler_config.enable_delayed_sampling
                 and model_input.seq_group_metadata_list is not None):
             for idx, seq_group_metadata in enumerate(
                     model_input.seq_group_metadata_list):
@@ -1931,7 +1956,6 @@ class HabanaModelRunner(
                     seq_data.prev_logits_idx = idx
         htorch.core.mark_step()
 
-        
         # Only perform sampling in the driver worker.
         if not self.is_driver_worker:
             return []
