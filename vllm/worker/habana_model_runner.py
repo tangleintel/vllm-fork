@@ -184,25 +184,6 @@ def align_workers(value, op):
     return value_t.item()
 
 
-def setup_profiler():
-    DEVICE='hpu'
-    STEPS=3
-    activities = [torch.profiler.ProfilerActivity.CPU]
-    activities.extend([torch.profiler.ProfilerActivity.HPU] if DEVICE == 'hpu' else [])
-    wait = 0
-    active = 1
-    warmup = STEPS - active
-
-    schedule = torch.profiler.schedule(wait=wait, warmup=warmup, active=active, repeat=1)
-    profiler = torch.profiler.profile(
-        schedule=schedule,
-        activities=activities,
-        on_trace_ready=torch.profiler.tensorboard_trace_handler('.', use_gzip=True),
-        record_shapes=False,
-        with_stack=True)
-    return profiler
-
-
 def pt_profiler(schedule):
     DEVICE = 'hpu'
     activities = [torch.profiler.ProfilerActivity.CPU]
