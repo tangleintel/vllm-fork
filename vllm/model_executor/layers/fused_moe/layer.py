@@ -103,11 +103,18 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                          num_expert_group=num_expert_group,
                          topk_group=topk_group)
 
-    def forward_hpu(self, x: torch.Tensor, w1: torch.Tensor, w2: torch.Tensor,
-                    router_logits: torch.Tensor, top_k: int, renormalize: bool,
-                    use_grouped_topk: bool, num_expert_group: Optional[int],
-                    topk_group: Optional[int],
-                    layer: Optional[torch.nn.Module],):
+    def forward_hpu(self,
+        x: torch.Tensor,
+        w1: torch.Tensor,
+        w2: torch.Tensor,
+        router_logits: torch.Tensor,
+        top_k: int,
+        renormalize: bool,
+        use_grouped_topk: bool,
+        num_expert_group: Optional[int],
+        topk_group: Optional[int],
+        layer: Optional[torch.nn.Module],
+    ):
         assert not use_grouped_topk, 'use_grouped_topk must be False on HPU'
         assert num_expert_group is None, ('num_expert_group is '
                                           'not supported on HPU')
@@ -211,7 +218,6 @@ class FusedMoE(torch.nn.Module):
             intermediate_size=self.intermediate_size_per_partition,
             params_dtype=params_dtype,
             weight_loader=self.weight_loader)
-
 
     def weight_loader(self, param: torch.nn.Parameter,
                       loaded_weight: torch.Tensor, weight_name: str,

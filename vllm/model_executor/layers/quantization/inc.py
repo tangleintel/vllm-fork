@@ -12,7 +12,6 @@ from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig)
 from vllm.model_executor.utils import set_weight_attrs
 
-
 ACTIVATION_SCHEMES = ["static", "dynamic"]
 
 logger = init_logger(__name__)
@@ -70,6 +69,7 @@ class INCConfig(QuantizationConfig):
     @staticmethod
     def get_config_filenames() -> List[str]:
         return []
+
 
 class INCLinearMethod(LinearMethodBase):
     """Linear method for FP8.

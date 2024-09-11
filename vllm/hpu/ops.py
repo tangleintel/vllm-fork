@@ -225,6 +225,7 @@ def dispatch_bgmv_embedding(
 
 
 class MoeMatmul(torch.nn.Module):
+
     def __init__(self):
         super().__init__()
 
@@ -240,14 +241,13 @@ class MoeMatmul(torch.nn.Module):
 
 
 class StaticFusedMOE(torch.nn.Module):
+
     def __init__(self, num_total_experts):
         super().__init__()
         self.w13_list = torch.nn.ModuleList(
-            [MoeMatmul() for _ in range(num_total_experts)]
-            )
+            [MoeMatmul() for _ in range(num_total_experts)])
         self.w2_list = torch.nn.ModuleList(
-            [MoeMatmul() for _ in range(num_total_experts)]
-            )
+            [MoeMatmul() for _ in range(num_total_experts)])
         self.num_total_experts = num_total_experts
 
 
@@ -255,7 +255,8 @@ class StaticFusedMOE(torch.nn.Module):
         B, D = hidden_states.shape
         routing_weights = F.softmax(score, dim=1, dtype=torch.float32)
         routing_weights, selected_experts = torch.topk(routing_weights,
-                                                       topk, dim=-1)
+                                                       topk,
+                                                       dim=-1)
         routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
         routing_weights = routing_weights.to(hidden_states.dtype)
         final_hidden_states = torch.zeros((1, B, D),
