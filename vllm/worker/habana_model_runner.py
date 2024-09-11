@@ -211,7 +211,8 @@ def align_workers(value, op):
     return value_t.item()
 
 
-def pt_profiler(schedule):
+def setup_profiler():
+    schedule = torch.profiler.schedule(wait=0, warmup=2, active=1, repeat=1)
     DEVICE = 'hpu'
     activities = [torch.profiler.ProfilerActivity.CPU]
     activities.extend([torch.profiler.ProfilerActivity.HPU] if DEVICE == 'hpu' else [])
@@ -226,39 +227,6 @@ def pt_profiler(schedule):
         record_shapes=False,
         with_stack=True)
     return profiler
-
-
-def hltv_profiler(schedule):
-    pt_tools_path = os.environ.get('PT_TOOLS_PATH', None)
-    assert pt_tools_path is not None, "Need to specify PT_TOOLS_PATH to use hltv profiling method"
-    sys.path.append(pt_tools_path)
-    from topologies import SynapseProfilerApi, TraceType
-    api = SynapseProfilerApi()
-    class SynapseProfiler:
-        def check(self):
-            if schedule(self.cur_step) == torch.profiler.ProfilerAction.RECORD_AND_SAVE:
-                api.profiler_start(TraceType.TraceAll, 0)
-        def start(self):
-            self.cur_step = 0
-            self.check()
-        def step(self):
-            self.cur_step = self.cur_step + 1
-            self.check()
-        def stop(self):
-            api.profiler_stop(TraceType.TraceAll, 0)
-            api.profiler_get_trace_json(TraceType.TraceAll, 0)
-    return SynapseProfiler()
-
-
-def setup_profiler():
-    prof_wait = 0
-    prof_warmup = 2
-    prof_active = 1
-    prof_type = os.environ.get('VLLM_PT_PROFILE_METHOD', 'pt')
-    assert prof_type in ['pt', 'hltv']
-    method = pt_profiler if prof_type == 'pt' else hltv_profiler
-    schedule = torch.profiler.schedule(wait=prof_wait, warmup=prof_warmup, active=prof_active, repeat=1)
-    return method(schedule)
 
 
 def pad_list(list, k, v):
@@ -1369,7 +1337,6 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if is_profile_run and self.is_driver_worker:
             profiler = setup_profiler()
             profiler.start()
-        self.profiler.start('internal', scenario_name)
         for _ in range(times):
             inputs = self.prepare_model_input(seqs)
             self.execute_model(inputs, kv_caches, warmup_mode=False)
