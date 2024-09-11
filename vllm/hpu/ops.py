@@ -250,7 +250,6 @@ class StaticFusedMOE(torch.nn.Module):
             [MoeMatmul() for _ in range(num_total_experts)])
         self.num_total_experts = num_total_experts
 
-
     def forward(self, hidden_states, w1, w2, score, topk):
         B, D = hidden_states.shape
         routing_weights = F.softmax(score, dim=1, dtype=torch.float32)

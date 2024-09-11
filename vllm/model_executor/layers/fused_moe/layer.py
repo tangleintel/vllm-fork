@@ -103,7 +103,8 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                          num_expert_group=num_expert_group,
                          topk_group=topk_group)
 
-    def forward_hpu(self,
+    def forward_hpu(
+        self,
         x: torch.Tensor,
         w1: torch.Tensor,
         w2: torch.Tensor,
