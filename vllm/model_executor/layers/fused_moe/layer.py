@@ -13,7 +13,6 @@ from vllm.model_executor.layers.quantization.base_config import (
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.utils import is_hpu
 
-
 logger = init_logger(__name__)
 
 
