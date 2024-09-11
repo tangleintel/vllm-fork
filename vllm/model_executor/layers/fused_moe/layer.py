@@ -113,7 +113,8 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         assert num_expert_group is None, ('num_expert_group is '
                                           'not supported on HPU')
         assert topk_group is None, 'topk_group is not supported on HPU'
-        return layer.hpu_static_fused_moe(x, w1, w2, router_logits, top_k)
+        if layer is not None:
+            return layer.hpu_static_fused_moe(x, w1, w2, router_logits, top_k)
 
     def forward_cpu(self, *args, **kwargs):
         raise NotImplementedError(
