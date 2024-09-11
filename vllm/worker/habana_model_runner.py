@@ -10,7 +10,6 @@ import gc
 import itertools
 import math
 import operator
-import sys
 import os
 import time
 from enum import IntEnum
@@ -215,7 +214,8 @@ def setup_profiler():
     schedule = torch.profiler.schedule(wait=0, warmup=2, active=1, repeat=1)
     DEVICE = 'hpu'
     activities = [torch.profiler.ProfilerActivity.CPU]
-    activities.extend([torch.profiler.ProfilerActivity.HPU] if DEVICE == 'hpu' else [])
+    activities.extend([torch.profiler.ProfilerActivity.HPU] if DEVICE ==
+                      'hpu' else [])
     #from habana_frameworks.torch.activity_profiler import DebugActivity
     #debug_activities=[DebugActivity.BRIDGE_FUNCTION_CALLS]
 
@@ -223,7 +223,8 @@ def setup_profiler():
         schedule=schedule,
         activities=activities,
         #debug_activities=debug_activities,
-        on_trace_ready=torch.profiler.tensorboard_trace_handler('.', use_gzip=True),
+        on_trace_ready=torch.profiler.tensorboard_trace_handler('.',
+                                                                use_gzip=True),
         record_shapes=False,
         with_stack=True)
     return profiler
@@ -1256,12 +1257,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         max_seq_len = min(self.prompt_seq_bucket_cfg[-1],
                           self.max_num_batched_tokens // max_batch_size)
 
-        self.warmup_scenario(max_batch_size,
-                             max_seq_len,
-                             True,
-                             kv_caches)
+        self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches)
         return
-    
 
     def warmup_scenario(self,
                         batch_size,
@@ -1456,15 +1453,14 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     @torch.inference_mode()
     def warmup_model(self, kv_caches: List[torch.Tensor]) -> None:
         if profile := os.environ.get('VLLM_PT_PROFILE', None):
-            phase, bs, seq_len, graphs = profile.split('_')
+            phase, bs, seq_len, graph = profile.split('_')
             is_prompt = phase == 'prompt'
-            bs = int(bs)
-            seq_len = int(seq_len)
-            graphs = graphs == 't'
+            graphs = graph == 't'
             if graphs:
-                self.graphed_buckets.add((bs, seq_len, is_prompt))
-            self.warmup_scenario(bs, seq_len, is_prompt, kv_caches, True)
-            assert False
+                self.graphed_buckets.add((int(bs), int(seq_len), is_prompt))
+            self.warmup_scenario(int(bs), int(seq_len), is_prompt, kv_caches,
+                                 True)
+            raise AssertionError("Finished profiling")
         if os.environ.get('VLLM_SKIP_WARMUP', 'false').lower() == 'true':
             logger.info("Skipping warmup...")
             return
