@@ -595,8 +595,6 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 htcore.mark_step()
             torch.hpu.synchronize()
 
-            # FIXME: Running with disable_tensor_cache=True causes
-            # RuntimeErrors. This needs to be debugged
             with HabanaMemoryProfiler() as m_wrap:
                 self.model = _maybe_wrap_in_hpu_graph(
                     self.model,
@@ -908,6 +906,9 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                               self.lora_config.max_lora_rank,
                               dtype=self.lora_config.lora_dtype)
 
+        dummy_slots = itertools.cycle(
+            range(_PAD_SLOT_ID, _PAD_SLOT_ID + self.block_size))
+
         for seq_group_metadata in seq_group_metadata_list:
             assert not seq_group_metadata.is_prompt
             assert seq_group_metadata.token_chunk_size == 1
@@ -937,8 +938,11 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
                 block_table = seq_group_metadata.block_tables[seq_id]
                 block_number = block_table[position // self.block_size]
-                block_offset = position % self.block_size
-                slot = block_number * self.block_size + block_offset
+                if block_number == _PAD_BLOCK_ID:
+                    slot = next(dummy_slots)
+                else:
+                    block_offset = position % self.block_size
+                    slot = block_number * self.block_size + block_offset
                 slot_mapping.append([slot])
                 lora_index_mapping.append(lora_id)
                 lora_prompt_mapping.append(lora_id)
@@ -958,12 +962,6 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         input_positions = torch.tensor(input_positions,
                                        dtype=torch.long,
                                        device=self.device)
-
-        dummy_slots = itertools.cycle(
-            range(_PAD_SLOT_ID, _PAD_SLOT_ID + self.block_size))
-        slot_mapping = [[
-            s if s != _PAD_SLOT_ID else next(dummy_slots) for s in sl
-        ] for sl in slot_mapping]
 
         num_decode_tokens = sum(seq_lens)
 
@@ -1339,7 +1337,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             profiler.start()
         for _ in range(times):
             inputs = self.prepare_model_input(seqs)
-            self.execute_model(inputs, kv_caches, warmup_mode=False)
+            self.execute_model(inputs, kv_caches, warmup_mode=True)
             torch.hpu.synchronize()
             if profiler:
                 profiler.step()
@@ -1614,10 +1612,9 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
 
 def _maybe_wrap_in_hpu_graph(*args, **kwargs):
-    return htorch.hpu.wrap_in_hpu_graph(HpuModelAdapter(
-        *args, **
-        kwargs)) if htorch.utils.internal.is_lazy() else HpuModelAdapter(
-            *args, **kwargs)
+    return htorch.hpu.wrap_in_hpu_graph(
+        HpuModelAdapter(*args, **kwargs), disable_tensor_cache=True
+    ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(*args, **kwargs)
 
 
 class HabanaProfilerCounterHelper():
