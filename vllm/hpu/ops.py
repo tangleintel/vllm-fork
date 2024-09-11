@@ -242,15 +242,20 @@ class MoeMatmul(torch.nn.Module):
 class StaticFusedMOE(torch.nn.Module):
     def __init__(self, num_total_experts):
         super().__init__()
-        self.w13_list = torch.nn.ModuleList([MoeMatmul() for _ in range(num_total_experts)])
-        self.w2_list = torch.nn.ModuleList([MoeMatmul() for _ in range(num_total_experts)])
+        self.w13_list = torch.nn.ModuleList(
+            [MoeMatmul() for _ in range(num_total_experts)]
+            )
+        self.w2_list = torch.nn.ModuleList(
+            [MoeMatmul() for _ in range(num_total_experts)]
+            )
         self.num_total_experts = num_total_experts
 
 
     def forward(self, hidden_states, w1, w2, score, topk):
         B, D = hidden_states.shape
         routing_weights = F.softmax(score, dim=1, dtype=torch.float32)
-        routing_weights, selected_experts = torch.topk(routing_weights, topk, dim=-1)
+        routing_weights, selected_experts = torch.topk(routing_weights,
+                                                       topk, dim=-1)
         routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
         routing_weights = routing_weights.to(hidden_states.dtype)
         final_hidden_states = torch.zeros((1, B, D),
@@ -267,7 +272,8 @@ class StaticFusedMOE(torch.nn.Module):
         for expert_idx in range(self.num_total_experts):
             padded_weight = padded_weights[expert_idx]
             current_state_static = hidden_states.reshape(-1, D)
-            w_output = self.w13_list[expert_idx].calc(current_state_static, expert_idx, w1)
+            w_output = self.w13_list[expert_idx].calc(current_state_static,
+                                                      expert_idx, w1)
             w_output = silu_and_mul(w_output)
             w_output = self.w2_list[expert_idx].calc(w_output, expert_idx, w2)
             current_hidden_states_static = w_output * padded_weight
