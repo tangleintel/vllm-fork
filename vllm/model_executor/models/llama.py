@@ -321,7 +321,7 @@ class LlamaModel(nn.Module):
             hidden_states = intermediate_tensors["hidden_states"]
             residual = intermediate_tensors["residual"]
 
-        if current_platform.is_hpu():
+        if is_hpu:
             import habana_frameworks.torch as htorch
             htorch.core.mark_step()
         for i in range(self.start_layer, self.end_layer):
@@ -333,7 +333,7 @@ class LlamaModel(nn.Module):
                 attn_metadata,
                 residual,
             )
-            if current_platform.is_hpu():
+            if is_hpu:
                 htorch.core.mark_step()
 
         if not get_pp_group().is_last_rank:
@@ -520,6 +520,8 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA):
                 weight_loader = getattr(param, "weight_loader",
                                         default_weight_loader)
                 weight_loader(param, loaded_weight)
+            if current_platform.is_hpu():
+                torch.hpu.synchronize()
 
             #Avoid OOM due to large graph when loading weights
             if current_platform.is_hpu():
