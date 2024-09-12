@@ -267,7 +267,6 @@ class StaticFusedMOE(torch.nn.Module):
         padded_weights.scatter_(-1, selected_experts, routing_weights)
         padded_weights = padded_weights.reshape(-1, B, self.num_total_experts)
         padded_weights = padded_weights.permute(2, 0, 1).unsqueeze(-1)
-        htorch.core.mark_step()
 
         for expert_idx in range(self.num_total_experts):
             padded_weight = padded_weights[expert_idx]
