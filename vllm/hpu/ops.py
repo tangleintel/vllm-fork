@@ -4,8 +4,8 @@
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
 ###############################################################################
-
-from typing import Optional
+import os
+from typing import Optional, Tuple
 
 
 import habana_frameworks.torch as htorch
@@ -244,14 +244,9 @@ def dispatch_bgmv_embedding(
     LoRA indices. Matmul masked output with `wb` and scale it to get the final
     output.
     """
-
-    assert layer_idx == 0, f'layer_idx should be 0, but got {layer_idx}'
-    max_loras = wb_t_all.size(0)
-    x = x.repeat(1, max_loras)
-    x = x * LoraMask.getLoraMask()
-    wb = wb_t_all[:, 0, :, :].transpose(1, 2)
-    wb = wb.reshape(wb.shape[0] * wb.shape[1], wb.shape[2])
-    out = x @ wb
+    x = x.unsqueeze(1)
+    out = x @ wa
+    out = out.squeeze(1)
     y += out * scale
 
 
@@ -313,4 +308,3 @@ def scaled_fp8_quant(
                                               dtype=torch.float8_e4m3fn)[0]
 
     return output, scale
-
