@@ -144,6 +144,10 @@ def run_vllm(
        print(f'TEST ACC: response = {output.outputs[0].text}')
        print('====\n\n')
 
+
+    print('out lens', [len(k.outputs[0].token_ids) for k in outputs])
+    print('inlen', [len(k) for k in prompts])
+
     measurement = os.getenv('QUANT_CONFIG', None)
     if measurement is not None and 'measure.json' in measurement and quantization == 'inc':
         llm.finish_measurements()
