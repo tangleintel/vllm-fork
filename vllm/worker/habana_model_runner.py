@@ -595,6 +595,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         self.model_memory_usage = m.consumed_device_memory
         msg = f"Loading model weights took in total {m.get_summary_string()}"
+
         logger.info(msg)
 
     def _use_graphs(self, batch_size, seq_len, is_prompt):
@@ -935,7 +936,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     block_table = []
                 else:
                     block_number = block_table[position // self.block_size]
-                block_number = block_table[position // self.block_size]
+
                 if block_number == _PAD_BLOCK_ID:
                     slot = next(dummy_slots)
                 else:
@@ -1053,6 +1054,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_group_metadata_list = seq_group_metadata_list.copy()
         seq_group_metadata_list.extend(seq_group_metadata_list[0]
                                        for _ in range(batch_size_padding))
+        #seq_group_metadata_list.extend(self.create_dummy_seq_group_metadata(0,0,is_prompt) for _ in range(batch_size_padding))
 
         prefill_reqs = []
         decode_reqs = []
@@ -1768,7 +1770,7 @@ class HabanaModelRunner(
         if num_steps > 1:
             raise ValueError(
                 "num_steps > 1 is not supported in HabanaModelRunner")
-        
+
         if self.lora_config:
             assert model_input.lora_requests is not None
             assert model_input.lora_mapping is not None
@@ -1806,10 +1808,11 @@ class HabanaModelRunner(
             execute_model_kwargs.update({"bypass_hpu_graphs": not use_graphs})
 
         htorch.core.mark_step()
+
         output = None
         input_ids = None
         # Sample the next token based on previous logits if any.
-        if self.scheduler_config.enable_delayed_sampling and not is_prompt and self.is_driver_worker:
+        if self.scheduler_config.enable_delayed_sampling and not is_prompt and self.is_driver_worker and not warmup_mode:
             logits_ids_list = []
             logits_tensor = None
             logits_tensor_list = []
@@ -1859,7 +1862,7 @@ class HabanaModelRunner(
             broadcast_tensor_dict(model_kwargs, src=0)
             input_ids = output.sampled_token_ids
 
-        elif self.scheduler_config.enable_delayed_sampling and not is_prompt:
+        elif self.scheduler_config.enable_delayed_sampling and not is_prompt and not warmup_mode:
 
             model_kwargs = broadcast_tensor_dict(src=0)
             input_ids = model_kwargs["input_ids"]
@@ -1877,6 +1880,7 @@ class HabanaModelRunner(
         else:
             model_event_name = 'model_executable'
         with self.profiler.record_event('internal', model_event_name):
+            #print("libin debug shape ",execute_model_kwargs["input_ids"].shape )
             hidden_states = self.model.forward(
                 **execute_model_kwargs,
                 selected_token_indices=sampling_metadata.selected_token_indices
@@ -1896,7 +1900,7 @@ class HabanaModelRunner(
                 lora_logits_mask.index_select(
                     0, sampling_metadata.selected_token_indices))
         
-        if self.scheduler_config.enable_delayed_sampling and self.is_driver_worker:
+        if self.scheduler_config.enable_delayed_sampling and self.is_driver_worker and not warmup_mode:
             if not is_prompt:
                 htorch.core.mark_step()
                 # Only after dispatching next model.forward() read and update
@@ -1936,6 +1940,7 @@ class HabanaModelRunner(
 
             output.outputs = output.outputs[:real_batch_size]
             htorch.core.mark_step()
+
         # Compute the logits.
         with self.profiler.record_event(
                 'internal', ('compute_logits_'
@@ -1961,7 +1966,7 @@ class HabanaModelRunner(
             return []
 
         # Sample the next token.
-        if not self.scheduler_config.enable_delayed_sampling:
+        if not self.scheduler_config.enable_delayed_sampling and not warmup_mode:
             with self.profiler.record_event(
                     'internal', ('sample_'
                                  f'{"prompt" if is_prompt else "decode"}_'

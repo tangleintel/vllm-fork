@@ -211,6 +211,28 @@ def sample_random_requests(
 
     return input_requests
 
+def sample_static_requests(
+    dataset_path: str, input_len: int, output_len: int, num_prompts: int, range_ratio: float,
+    tokenizer: PreTrainedTokenizerBase) -> List[Tuple[str, int, int]]:
+
+    # Load the dataset.
+    with open(dataset_path) as f:
+        dataset_lines = f.readlines()
+
+    data= dataset_lines[1].split('[')[1].split(']')[0]
+
+    # Tokenize the  lines.
+    token_ids = tokenizer(data, truncation=True, max_length=input_len).input_ids
+    prompt = tokenizer.decode(token_ids)
+    #with open("Output.txt", "w") as text_file:
+        #text_file.write(prompt)
+        #exit()
+
+    input_requests = []
+    for i in range(num_prompts):
+        input_requests.append((prompt, input_len, output_len))
+    return input_requests
+
 
 async def get_request(
     input_requests: List[Tuple[str, int, int]],
@@ -310,6 +332,7 @@ async def benchmark(
 
     print("Starting initial single prompt test run...")
     test_prompt, test_prompt_len, test_output_len = input_requests[0]
+
     test_input = RequestFuncInput(
         model=model_id,
         prompt=test_prompt,
@@ -439,7 +462,18 @@ def main(args: argparse.Namespace):
     tokenizer = get_tokenizer(tokenizer_id,
                               trust_remote_code=args.trust_remote_code)
 
-    if args.dataset is not None:
+    if args.dataset_name == "static":
+       input_requests = sample_static_requests(
+            dataset_path=args.dataset_path,
+            input_len=args.static_input_len,
+            output_len=args.static_output_len,
+            num_prompts=args.num_prompts,
+            range_ratio=args.random_range_ratio,
+            tokenizer=tokenizer,
+        )
+
+
+    elif args.dataset is not None:
         warnings.warn(
             "The '--dataset' argument will be deprecated in the next "
             "release. Please use '--dataset-name' and "
@@ -592,7 +626,7 @@ if __name__ == "__main__":
         "--dataset-name",
         type=str,
         default="sharegpt",
-        choices=["sharegpt", "sonnet", "random"],
+        choices=["sharegpt", "sonnet", "random", "static"],
         help="Name of the dataset to benchmark on.",
     )
     parser.add_argument("--dataset-path",
@@ -666,6 +700,21 @@ if __name__ == "__main__":
         help=
         "Number of output tokens per request, used only for random sampling.",
     )
+    parser.add_argument(
+        "--static-input-len",
+        type=int,
+        default=2048,
+        help=
+        "Number of input tokens per request, used only for static sampling.",
+    )
+    parser.add_argument(
+        "--static-output-len",
+        type=int,
+        default=2048,
+        help=
+        "Number of output tokens per request, used only for static sampling.",
+    )
+
     parser.add_argument(
         "--random-range-ratio",
         type=float,

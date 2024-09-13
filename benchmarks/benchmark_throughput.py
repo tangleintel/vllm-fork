@@ -140,8 +140,8 @@ def run_vllm(
     for output in outputs:
        print('==========')
        print(f'TEST ACC: request id = {output.request_id}')
-       print(f'TEST ACC: prompt = {output.prompt}')
-       print(f'TEST ACC: response = {output.outputs[0].text}')
+       print(f'TEST ACC: prompt = {len(output.prompt)} {output.prompt}')
+       print(f'TEST ACC: response ={len(output.outputs[0].text)}, {output.outputs[0].text}')
        print('====\n\n')
 
     measurement = os.getenv('QUANT_CONFIG', None)
