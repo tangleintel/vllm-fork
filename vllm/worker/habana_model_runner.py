@@ -1744,7 +1744,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 "Warmup time will be negatively impacted. "
                 "Please update Gaudi Software Suite."
             )
-        with compile_only_mode_context() if can_use_compile_only_mode else contextlib.nullcontext():
+        with compile_only_mode_context() if can_use_compile_only_mode \
+            else contextlib.nullcontext():
             self.warmup_all_buckets(self.prompt_buckets, True, kv_caches)
             self.warmup_all_buckets(self.decode_buckets, False, kv_caches)
 
