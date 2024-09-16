@@ -93,8 +93,6 @@ class HpuRotaryEmbedding(nn.Module):
                                     device=query.device,
                                     dtype=query.dtype)
 
-        cos, sin = self.cos_cached[:seq_len].to(
-            dtype=query.dtype), self.sin_cached[:seq_len].to(dtype=query.dtype)
         query = query.reshape(
             (query.shape[0], query.shape[1], query.shape[2] // self.head_size,
              self.head_size))
@@ -107,11 +105,23 @@ class HpuRotaryEmbedding(nn.Module):
             key_pass = key[..., self.dim:]
 
         if len(positions[0]) == 1:
-            cos = self.cos_cached[positions].unsqueeze(2).to(dtype=query.dtype)
-            sin = self.sin_cached[positions].unsqueeze(2).to(dtype=query.dtype)
+            # cos = self.cos_cached[positions].unsqueeze(2).to(dtype=query.dtype)
+            # sin = self.sin_cached[positions].unsqueeze(2).to(dtype=query.dtype)
+            cos = torch.ops.hpu.plain_index(
+                self.cos_cached,
+                [positions]).unsqueeze(2).to(dtype=query.dtype)
+            sin = torch.ops.hpu.plain_index(
+                self.sin_cached,
+                [positions]).unsqueeze(2).to(dtype=query.dtype)
         else:
-            cos = cos[positions].unsqueeze(2)
-            sin = sin[positions].unsqueeze(2)
+            cosV = self.cos_cached[:seq_len].to(dtype=query.dtype)
+            sinV = self.sin_cached[:seq_len].to(dtype=query.dtype)
+            cos = torch.ops.hpu.plain_index(cosV, [positions]).unsqueeze(2)
+            sin = torch.ops.hpu.plain_index(sinV, [positions]).unsqueeze(2)
+            # cos = cosV[positions].unsqueeze(2)
+            # assert cos.equal(cosV[positions].unsqueeze(2))
+            # sin = sinV[positions].unsqueeze(2)
+            # assert sin.equal(sinV[positions].unsqueeze(2))
         query, key = FusedRoPE.apply(query_rot, cos, sin,
                                      0), FusedRoPE.apply(key_rot, cos, sin, 0)
         if self.dim < self.head_size:
