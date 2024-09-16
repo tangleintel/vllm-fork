@@ -13,36 +13,17 @@ import operator
 import os
 import time
 from enum import IntEnum
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Callable,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    Set,
-    Tuple,
-    Type,
-    TypeVar,
-    Union,
-)
+from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
+                    Optional, Set, Tuple, Type, TypeVar, Union)
 
 import habana_frameworks.torch as htorch
 import habana_frameworks.torch.internal.bridge_config as bc
 import torch
 
 from vllm.attention import AttentionMetadata, get_attn_backend
-from vllm.config import (
-    CacheConfig,
-    DeviceConfig,
-    LoadConfig,
-    LoRAConfig,
-    ModelConfig,
-    MultiModalConfig,
-    ParallelConfig,
-    SchedulerConfig,
-)
+from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
+                         ModelConfig, MultiModalConfig, ParallelConfig,
+                         SchedulerConfig)
 from vllm.distributed.parallel_state import get_world_group
 from vllm.hpu.ops import LoraMask as LoraMask
 from vllm.logger import init_logger
@@ -52,26 +33,16 @@ from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
 from vllm.model_executor import SamplingMetadata
 from vllm.model_executor.model_loader import get_model
 from vllm.sampling_params import SamplingParams
-from vllm.sequence import (
-    IntermediateTensors,
-    SamplerOutput,
-    SequenceData,
-    SequenceGroupMetadata,
-)
-from vllm.utils import (
-    HabanaMemoryProfiler,
-    format_bytes,
-    is_pin_memory_available,
-    make_tensor_with_pad,
-)
+from vllm.sequence import (IntermediateTensors, SamplerOutput, SequenceData,
+                           SequenceGroupMetadata)
+from vllm.utils import (HabanaMemoryProfiler, format_bytes,
+                        is_pin_memory_available, make_tensor_with_pad)
 from vllm.worker.model_runner_base import (
-    ModelRunnerBase,
-    ModelRunnerInputBase,
+    ModelRunnerBase, ModelRunnerInputBase,
     _add_attn_metadata_broadcastable_dict,
     _add_sampling_metadata_broadcastable_dict,
     _init_attn_metadata_from_tensor_dict,
-    _init_sampling_metadata_from_tensor_dict,
-)
+    _init_sampling_metadata_from_tensor_dict)
 
 from .profiler import Profiler
 
@@ -684,10 +655,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 logger.info("Preparing model with INC..")
                 with HabanaMemoryProfiler() as m_inc:
                     from neural_compressor.torch.quantization import (
-                        FP8Config,
-                        convert,
-                        prepare,
-                    )
+                        FP8Config, convert, prepare)
 
                     config = FP8Config.from_json_file(
                         os.getenv("QUANT_CONFIG", "")
@@ -2206,8 +2174,7 @@ class HabanaModelRunner(
         ) == "inc":
             print("inc shutdown start")
             from neural_compressor.torch.quantization import (
-                finalize_calibration,
-            )
+                finalize_calibration)
 
             finalize_calibration(self.model.model)
             print("inc shutdown")

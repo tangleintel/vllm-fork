@@ -4,18 +4,13 @@ import torch
 from torch.nn import Parameter
 
 from vllm.model_executor.layers.quantization.compressed_tensors.schemes import (
-    CompressedTensorsScheme,
-)
+    CompressedTensorsScheme)
 from vllm.model_executor.layers.quantization.compressed_tensors.utils import (
-    QuantizationStrategy,
-)
+    QuantizationStrategy)
 from vllm.model_executor.layers.quantization.utils.w8a8_utils import (
-    apply_fp8_linear,
-    create_per_channel_scale_param,
-    create_per_tensor_scale_param,
-    cutlass_fp8_supported,
-    requantize_with_max_scale,
-)
+    apply_fp8_linear, create_per_channel_scale_param,
+    create_per_tensor_scale_param, cutlass_fp8_supported,
+    requantize_with_max_scale)
 from vllm.model_executor.utils import set_weight_attrs
 
 __all__ = ["CompressedTensorsW8A8Fp8"]

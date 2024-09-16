@@ -5,29 +5,17 @@ from pydantic import BaseModel
 
 from vllm.model_executor.layers.linear import LinearBase, LinearMethodBase
 from vllm.model_executor.layers.quantization.base_config import (  # noqa: E501
-    QuantizationConfig,
-    QuantizeMethodBase,
-)
+    QuantizationConfig, QuantizeMethodBase)
 from vllm.model_executor.layers.quantization.compressed_tensors.schemes import (
-    W4A16SPARSE24_SUPPORTED_BITS,
-    WNA16_SUPPORTED_BITS,
-    CompressedTensorsScheme,
-    CompressedTensorsUnquantized,
-    CompressedTensorsW4A16Sparse24,
-    CompressedTensorsW8A8Fp8,
-    CompressedTensorsW8A8Int8,
-    CompressedTensorsW8A16Fp8,
-    CompressedTensorsWNA16,
-)
+    W4A16SPARSE24_SUPPORTED_BITS, WNA16_SUPPORTED_BITS,
+    CompressedTensorsScheme, CompressedTensorsUnquantized,
+    CompressedTensorsW4A16Sparse24, CompressedTensorsW8A8Fp8,
+    CompressedTensorsW8A8Int8, CompressedTensorsW8A16Fp8,
+    CompressedTensorsWNA16)
 from vllm.model_executor.layers.quantization.compressed_tensors.utils import (
-    CompressionFormat,
-    QuantizationArgs,
-    QuantizationStrategy,
-    QuantizationType,
-    find_matched_target,
-    is_activation_quantization_format,
-    should_ignore_layer,
-)
+    CompressionFormat, QuantizationArgs, QuantizationStrategy,
+    QuantizationType, find_matched_target, is_activation_quantization_format,
+    should_ignore_layer)
 from vllm.model_executor.layers.quantization.kv_cache import BaseKVCacheMethod
 from vllm.platforms import current_platform
 
