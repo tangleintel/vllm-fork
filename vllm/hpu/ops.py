@@ -164,9 +164,9 @@ def prompt_attention(
             attn_weights = attn_weights.flatten(1, 2)
     else:
         #TODO: remove after fusedsdpa fix for query_heads != kv_heads
-        if query_heads != kv_heads:
-            key = repeat_kv(key, int(query_heads // kv_heads))
-            value = repeat_kv(value, int(query_heads // kv_heads))
+        #if query_heads != kv_heads:
+            #key = repeat_kv(key, int(query_heads // kv_heads))
+            #value = repeat_kv(value, int(query_heads // kv_heads))
         softmax_mode = 'fast'
         recompute_mode = True
         attn_weights = FusedSDPA.apply(query, key, value, None, 0.0, True,
