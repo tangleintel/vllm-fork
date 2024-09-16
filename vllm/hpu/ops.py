@@ -264,30 +264,28 @@ class StaticFusedMOE(torch.nn.Module):
         self.num_total_experts = num_total_experts
 
     def forward(self, hidden_states, w1, w2, score, topk):
+        htorch.core.mark_step()
         B, D = hidden_states.shape
+        num_experts = w1.shape[0]
         routing_weights = F.softmax(score, dim=1, dtype=torch.float32)
         routing_weights, selected_experts = torch.topk(routing_weights,
                                                        topk,
                                                        dim=-1)
         routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
         routing_weights = routing_weights.to(hidden_states.dtype)
-        final_hidden_states = torch.zeros((1, B, D),
-                                          dtype=hidden_states.dtype,
-                                          device=hidden_states.device)
-        padded_weights = torch.zeros((B, self.num_total_experts),
-                                     dtype=hidden_states.dtype,
-                                     device=hidden_states.device)
-        padded_weights.scatter_(-1, selected_experts, routing_weights)
-        padded_weights = padded_weights.reshape(-1, B, self.num_total_experts)
-        padded_weights = padded_weights.permute(2, 0, 1).unsqueeze(-1)
-        htorch.core.mark_step()
+        # pre-processing for custom op inputs
+        w1_list = [w1[i,:,:].squeeze() for i in range(num_experts)]
+        w2_list = [w2[i,:,:].squeeze() for i in range(num_experts)]
 
-        for expert_idx in range(self.num_total_experts):
-            padded_weight = padded_weights[expert_idx]
-            w_output = self.w13_list[expert_idx].calc(hidden_states,
-                                                      expert_idx, w1)
-            w_output = silu_and_mul(w_output)
-            w_output = self.w2_list[expert_idx].calc(w_output, expert_idx, w2)
-            final_hidden_states += w_output * padded_weight
-
+        final_hidden_states = torch.ops.hpu.mixture_of_experts(
+            hidden_states=hidden_states,
+            expert_routing_table=selected_experts,
+            router_weights=routing_weights,
+            w12=w1_list,
+            w3=w2_list,
+            permuted_weights=True,
+            activation="silu",
+            experts_min=0,
+            experts_max=7
+        )
         return final_hidden_states.view(-1, D)

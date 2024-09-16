@@ -120,7 +120,7 @@ case $model in
     model="/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-405B-Instruct/"
     ;;
     "mixtral-8x7b")
-    model="/software/users/schoi/models--mistralai--Mixtral-8x7B-Instruct-v0.1/snapshots/1e637f2d7cb0a9d6fb1922f305cb784995190a83/"
+    model="/mnt/weka/data/mixtral/models--mistralai--Mixtral-8x7B-Instruct-v0.1/snapshots/1e637f2d7cb0a9d6fb1922f305cb784995190a83/"
     ;;
 esac
 
@@ -185,8 +185,8 @@ export VLLM_PROMPT_SEQ_BUCKET_STEP=$input_len #2176
 export VLLM_DECODE_BS_BUCKET_MIN=$batch_size
 export VLLM_DECODE_BS_BUCKET_STEP=$batch_size
 export VLLM_DECODE_BS_BUCKET_MAX=$batch_size
-export VLLM_DECODE_SEQ_BUCKET_MIN=256 #272
-export VLLM_DECODE_SEQ_BUCKET_STEP=256 #272
+export VLLM_DECODE_SEQ_BUCKET_MIN=2176 #272
+export VLLM_DECODE_SEQ_BUCKET_STEP=128 #272
 
 
 AVAILABLE_HPU=`ls /dev/accel/accel[0-9] | wc -l`
@@ -216,6 +216,8 @@ python -m vllm.entrypoints.openai.api_server --port 8084 \
         --block-size 128 \
         --max-model-len 4096 \
         --gpu-memory-utilization 0.95 \
+        --chat-template=/root/npu-stack/pytorch-training-tests/tests/gdn_tests/CB_tests/continous_batching_inference/benchmark/data/template/mistral_mixtral.jinja \
+        --swap-space 16 \
         $EAGER_FLAG \
         $SAMPLING_FLAGS \
         $QUANT_FLAGS >> ${output_dir}/vllm_server.log 2>&1 &
