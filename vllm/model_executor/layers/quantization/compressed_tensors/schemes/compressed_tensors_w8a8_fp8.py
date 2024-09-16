@@ -4,25 +4,30 @@ import torch
 from torch.nn import Parameter
 
 from vllm.model_executor.layers.quantization.compressed_tensors.schemes import (
-    CompressedTensorsScheme)
+    CompressedTensorsScheme,
+)
 from vllm.model_executor.layers.quantization.compressed_tensors.utils import (
-    QuantizationStrategy)
+    QuantizationStrategy,
+)
 from vllm.model_executor.layers.quantization.utils.w8a8_utils import (
-    apply_fp8_linear, create_per_channel_scale_param,
-    create_per_tensor_scale_param, cutlass_fp8_supported,
-    requantize_with_max_scale)
+    apply_fp8_linear,
+    create_per_channel_scale_param,
+    create_per_tensor_scale_param,
+    cutlass_fp8_supported,
+    requantize_with_max_scale,
+)
 from vllm.model_executor.utils import set_weight_attrs
 
 __all__ = ["CompressedTensorsW8A8Fp8"]
 
 
 class CompressedTensorsW8A8Fp8(CompressedTensorsScheme):
-
     def __init__(self, strategy: str, is_static_input_scheme: bool):
         self.strategy = strategy
         self.is_static_input_scheme = is_static_input_scheme
-        self.cutlass_fp8_supported = cutlass_fp8_supported() \
-            if torch.cuda.is_available() else False
+        self.cutlass_fp8_supported = (
+            cutlass_fp8_supported() if torch.cuda.is_available() else False
+        )
 
     @classmethod
     def get_min_capability(cls) -> int:
@@ -53,53 +58,69 @@ class CompressedTensorsW8A8Fp8(CompressedTensorsScheme):
 
         # INPUT SCALE
         if self.is_static_input_scheme:
-            layer.input_scale = Parameter(layer.input_scale.max(),
-                                          requires_grad=False)
+            layer.input_scale = Parameter(
+                layer.input_scale.max(), requires_grad=False
+            )
         else:
             layer.input_scale = None
 
-    def create_weights(self, layer: torch.nn.Module,
-                       output_partition_sizes: List[int],
-                       input_size_per_partition: int,
-                       params_dtype: torch.dtype, weight_loader: Callable,
-                       **kwargs):
+    def create_weights(
+        self,
+        layer: torch.nn.Module,
+        output_partition_sizes: List[int],
+        input_size_per_partition: int,
+        params_dtype: torch.dtype,
+        weight_loader: Callable,
+        **kwargs,
+    ):
         output_size_per_partition = sum(output_partition_sizes)
         layer.logical_widths = output_partition_sizes
 
         # WEIGHT
-        weight = torch.nn.Parameter(torch.empty(output_size_per_partition,
-                                                input_size_per_partition,
-                                                dtype=torch.float8_e4m3fn),
-                                    requires_grad=False)
+        weight = torch.nn.Parameter(
+            torch.empty(
+                output_size_per_partition,
+                input_size_per_partition,
+                dtype=torch.float8_e4m3fn,
+            ),
+            requires_grad=False,
+        )
         layer.register_parameter("weight", weight)
-        set_weight_attrs(weight, {
-            "input_dim": 1,
-            "output_dim": 0,
-            "weight_loader": weight_loader,
-        })
+        set_weight_attrs(
+            weight,
+            {
+                "input_dim": 1,
+                "output_dim": 0,
+                "weight_loader": weight_loader,
+            },
+        )
 
         # WEIGHT SCALE
         layer_kwargs = {"weight_loader": weight_loader}
         if self.strategy == QuantizationStrategy.CHANNEL:
             weight_scale = create_per_channel_scale_param(
-                output_partition_sizes, **layer_kwargs)
+                output_partition_sizes, **layer_kwargs
+            )
         else:
             assert self.strategy == QuantizationStrategy.TENSOR
             weight_scale = create_per_tensor_scale_param(
-                output_partition_sizes, **layer_kwargs)
+                output_partition_sizes, **layer_kwargs
+            )
         layer.register_parameter("weight_scale", weight_scale)
 
         # INPUT SCALE
         if self.is_static_input_scheme:
             input_scale = create_per_tensor_scale_param(
-                output_partition_sizes, **layer_kwargs)
+                output_partition_sizes, **layer_kwargs
+            )
             layer.register_parameter("input_scale", input_scale)
 
-    def apply_weights(self,
-                      layer: torch.nn.Module,
-                      x: torch.Tensor,
-                      bias: Optional[torch.Tensor] = None) -> torch.Tensor:
-
+    def apply_weights(
+        self,
+        layer: torch.nn.Module,
+        x: torch.Tensor,
+        bias: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         return apply_fp8_linear(
             input=x,
             weight=layer.weight,
@@ -107,4 +128,5 @@ class CompressedTensorsW8A8Fp8(CompressedTensorsScheme):
             input_scale=layer.input_scale,
             bias=bias,
             cutlass_fp8_supported=self.cutlass_fp8_supported,
-            use_per_token_if_dynamic=True)
+            use_per_token_if_dynamic=True,
+        )
