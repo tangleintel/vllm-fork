@@ -951,7 +951,6 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                              self.block_size)
                     block_table = block_table[-sliding_window_blocks:]
                 block_tables.append(block_table)
-
         if lora_mask is not None:
             lora_mask = lora_mask.to('hpu')
             lora_logits_mask = lora_mask
@@ -978,7 +977,6 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         block_usage = [[self.block_size] * (b_u - 1) + [lb]
                        for b_u, lb in zip(blocks_used, last_block)]
         block_usage = list(itertools.chain(*block_usage))
-
         block_bucket_size = find_bucket(len(block_list),
                                         self.decode_block_bucket_cfg)
         block_list = pad_list(block_list, block_bucket_size, _PAD_SLOT_ID)
@@ -1052,9 +1050,10 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         batch_size_padded = find_bucket(real_batch_size, bucket_cfg)
         batch_size_padding = batch_size_padded - real_batch_size
         seq_group_metadata_list = seq_group_metadata_list.copy()
-        seq_group_metadata_list.extend(seq_group_metadata_list[0]
-                                       for _ in range(batch_size_padding))
-        #seq_group_metadata_list.extend(self.create_dummy_seq_group_metadata(0,0,is_prompt) for _ in range(batch_size_padding))
+
+        #seq_group_metadata_list.extend(seq_group_metadata_list[0]
+        #                               for _ in range(batch_size_padding))
+        seq_group_metadata_list.extend(self.create_dummy_seq_group_metadata(0,0,is_prompt) for _ in range(batch_size_padding))
 
         prefill_reqs = []
         decode_reqs = []
@@ -1836,15 +1835,17 @@ class HabanaModelRunner(
                                         device=seq_data.prev_logits.device)])
                                 logits_ids_list = [seq_data.prev_logits_idx]
                                 logits_tensor = seq_data.prev_logits
+                            device = seq_data.prev_logits.device
+                            length = seq_data.prev_logits.shape[1]
                         else:
-                            # warmup only, TODO add a check
+                            # padded batch
                             logits_tensor_list.append(
-                                torch.zeros([1, 32000],
+                                torch.zeros([1, length],
                                             dtype=torch.float,
                                             device="hpu"))
             if logits_tensor is not None:
                 logits_tensor_list.append(logits_tensor[torch.tensor(
-                    logits_ids_list, device=seq_data.prev_logits.device)])
+                    logits_ids_list, device=device)])
 
             prev_logits = torch.cat(logits_tensor_list, dim=0)
 
@@ -1909,8 +1910,8 @@ class HabanaModelRunner(
                 i = 0 
                 for seq_group_output in output.outputs[:real_batch_size]:
                     for sample in seq_group_output.samples:
-                        #sample.output_token = sampled_token_ids[sample.output_token][0]
-                        sample.output_token = sampled_token_ids[i][0]
+                        sample.output_token = sampled_token_ids[sample.output_token][0]
+                        #sample.output_token = sampled_token_ids[i][0]
                     i = i + 1
                 output = output
             else:
