@@ -11,6 +11,7 @@ import itertools
 import math
 import operator
 import os
+import sys
 import time
 from enum import IntEnum
 from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
@@ -59,6 +60,53 @@ _PAD_BLOCK_ID = 0
 
 LORA_WARMUP_RANK = 8
 
+def pt_profiler(schedule):
+    DEVICE = 'hpu'
+    activities = [torch.profiler.ProfilerActivity.CPU]
+    activities.extend([torch.profiler.ProfilerActivity.HPU] if DEVICE == 'hpu' else [])
+    #from habana_frameworks.torch.activity_profiler import DebugActivity
+    #debug_activities=[DebugActivity.BRIDGE_FUNCTION_CALLS]
+    profiler = torch.profiler.profile(
+        schedule=schedule,
+        activities=activities,
+        #debug_activities=debug_activities,
+        on_trace_ready=torch.profiler.tensorboard_trace_handler('.', use_gzip=True),
+        record_shapes=False,
+        with_stack=True)
+    return profiler
+
+
+def hltv_profiler(schedule):
+    pt_tools_path = os.environ.get('PT_TOOLS_PATH', None)
+    assert pt_tools_path is not None, "Need to specify PT_TOOLS_PATH to use hltv profiling method"
+    sys.path.append(pt_tools_path)
+    from topologies import SynapseProfilerApi, TraceType
+    api = SynapseProfilerApi()
+    class SynapseProfiler:
+        def check(self):
+            if schedule(self.cur_step) == torch.profiler.ProfilerAction.RECORD_AND_SAVE:
+                api.profiler_start(TraceType.TraceAll, 0)
+        def start(self):
+            self.cur_step = 0
+            self.check()
+        def step(self):
+            self.cur_step = self.cur_step + 1
+            self.check()
+        def stop(self):
+            api.profiler_stop(TraceType.TraceAll, 0)
+            api.profiler_get_trace_json(TraceType.TraceAll, 0)
+    return SynapseProfiler()
+
+
+def setup_profiler():
+    prof_wait = 0
+    prof_warmup = 2
+    prof_active = 1
+    prof_type = os.environ.get('VLLM_PT_PROFILE_METHOD', 'pt')
+    assert prof_type in ['pt', 'hltv']
+    method = pt_profiler if prof_type == 'pt' else hltv_profiler
+    schedule = torch.profiler.schedule(wait=prof_wait, warmup=prof_warmup, active=prof_active, repeat=1)
+    return method(schedule)
 
 def subtuple(obj: object,
              typename: str,
@@ -1269,7 +1317,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         seq_len,
                         is_prompt,
                         kv_caches,
-                        is_profile_run=False) -> None:
+                        is_profile_run=False,
+                        habana_profile=False) -> None:
         use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
         scenario_name = ("warmup_"
                          f"{'prompt' if is_prompt else 'decode'}_"
@@ -1332,10 +1381,21 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 for i, b in enumerate(blocks)
             ]
         torch.hpu.synchronize()
-        for _ in range(times):
+
+        habana_profiler = None
+        if habana_profile and self.is_driver_worker:
+            habana_profiler = setup_profiler()
+            habana_profiler.start()
+
+        for i in range(times):
             inputs = self.prepare_model_input(seqs)
             self.execute_model(inputs, kv_caches, warmup_mode=True)
             torch.hpu.synchronize()
+            if habana_profile:
+                habana_profiler.step()
+
+        if habana_profiler:
+            habana_profiler.stop()
         gc.collect()
 
     def remove_all_loras(self):
@@ -1447,6 +1507,17 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     @torch.inference_mode()
     def warmup_model(self, kv_caches: List[torch.Tensor]) -> None:
+        if habana_profile := os.environ.get('VLLM_PT_PROFILE', None):
+            logger.info(f"habana_profile :{habana_profile}")
+            phase, bs, seq_len, graphs = habana_profile.split('_')
+            is_prompt = phase == 'prompt'
+            bs = int(bs)
+            seq_len = int(seq_len)
+            graphs = graphs == 't'
+            if graphs:
+                self.graphed_buckets.add((bs, seq_len, is_prompt))
+            self.warmup_scenario(bs, seq_len, is_prompt, kv_caches, False, True)
+            assert False
         if os.environ.get('VLLM_SKIP_WARMUP', 'false').lower() == 'true':
             logger.info("Skipping warmup...")
             return
