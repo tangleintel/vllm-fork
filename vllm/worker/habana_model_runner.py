@@ -1900,7 +1900,7 @@ class HabanaModelRunner(
             LoraMask.setLoraMask(
                 lora_logits_mask.index_select(
                     0, sampling_metadata.selected_token_indices))
-        
+
         if self.scheduler_config.enable_delayed_sampling and self.is_driver_worker and not warmup_mode:
             if not is_prompt:
                 htorch.core.mark_step()
@@ -1910,8 +1910,8 @@ class HabanaModelRunner(
                 i = 0 
                 for seq_group_output in output.outputs[:real_batch_size]:
                     for sample in seq_group_output.samples:
-                        sample.output_token = sampled_token_ids[sample.output_token][0]
-                        #sample.output_token = sampled_token_ids[i][0]
+                        #sample.output_token = sampled_token_ids[sample.output_token][0]
+                        sample.output_token = sampled_token_ids[i][0]
                     i = i + 1
                 output = output
             else:
