@@ -21,8 +21,7 @@ class CompressedTensorsW8A8Fp8(CompressedTensorsScheme):
     def __init__(self, strategy: str, is_static_input_scheme: bool):
         self.strategy = strategy
         self.is_static_input_scheme = is_static_input_scheme
-        self.cutlass_fp8_supported = (cutlass_fp8_supported()
-                                      if torch.cuda.is_available() else False)
+        self.cutlass_fp8_supported = cutlass_fp8_supported() if torch.cuda.is_available() else False
 
     @classmethod
     def get_min_capability(cls) -> int:
@@ -58,36 +57,25 @@ class CompressedTensorsW8A8Fp8(CompressedTensorsScheme):
         else:
             layer.input_scale = None
 
-    def create_weights(
-        self,
-        layer: torch.nn.Module,
-        output_partition_sizes: List[int],
-        input_size_per_partition: int,
-        params_dtype: torch.dtype,
-        weight_loader: Callable,
-        **kwargs,
-    ):
+    def create_weights(self, layer: torch.nn.Module,
+                       output_partition_sizes: List[int],
+                       input_size_per_partition: int,
+                       params_dtype: torch.dtype, weight_loader: Callable,
+                       **kwargs):
         output_size_per_partition = sum(output_partition_sizes)
         layer.logical_widths = output_partition_sizes
 
         # WEIGHT
-        weight = torch.nn.Parameter(
-            torch.empty(
-                output_size_per_partition,
-                input_size_per_partition,
-                dtype=torch.float8_e4m3fn,
-            ),
-            requires_grad=False,
-        )
+        weight = torch.nn.Parameter(torch.empty(output_size_per_partition,
+                                                input_size_per_partition,
+                                                dtype=torch.float8_e4m3fn),
+                                    requires_grad=False)
         layer.register_parameter("weight", weight)
-        set_weight_attrs(
-            weight,
-            {
-                "input_dim": 1,
-                "output_dim": 0,
-                "weight_loader": weight_loader,
-            },
-        )
+        set_weight_attrs(weight, {
+            "input_dim": 1,
+            "output_dim": 0,
+            "weight_loader": weight_loader,
+        })
 
         # WEIGHT SCALE
         layer_kwargs = {"weight_loader": weight_loader}
@@ -106,12 +94,11 @@ class CompressedTensorsW8A8Fp8(CompressedTensorsScheme):
                 output_partition_sizes, **layer_kwargs)
             layer.register_parameter("input_scale", input_scale)
 
-    def apply_weights(
-        self,
-        layer: torch.nn.Module,
-        x: torch.Tensor,
-        bias: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
+    def apply_weights(self,
+                      layer: torch.nn.Module,
+                      x: torch.Tensor,
+                      bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+
         return apply_fp8_linear(
             input=x,
             weight=layer.weight,
@@ -119,5 +106,4 @@ class CompressedTensorsW8A8Fp8(CompressedTensorsScheme):
             input_scale=layer.input_scale,
             bias=bias,
             cutlass_fp8_supported=self.cutlass_fp8_supported,
-            use_per_token_if_dynamic=True,
-        )
+            use_per_token_if_dynamic=True)

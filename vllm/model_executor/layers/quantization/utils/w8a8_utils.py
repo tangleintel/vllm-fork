@@ -6,14 +6,10 @@ from torch.nn import Parameter
 from vllm import _custom_ops as ops
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.platforms import current_platform
-
 if current_platform.is_hpu():
     import habana_frameworks.torch.utils.experimental as htexp
-
     from vllm.hpu.ops import scaled_fp8_quant
-
     ops.scaled_fp8_quant = scaled_fp8_quant
-
 
 def cutlass_fp8_supported() -> bool:
     capability = current_platform.get_device_capability()
@@ -30,8 +26,8 @@ def per_tensor_dequantize(
     if current_platform.is_hpu():
         dtype = torch.bfloat16
         if htexp._get_device_type() == htexp.synDeviceType.synDeviceGaudi2:
-            # dequant on cpu to avoid nan on gaudi2
-            tensor = tensor.to("cpu")
+        #dequant on cpu to avoid nan on gaudi2
+            tensor = tensor.to('cpu')
 
     fake_qweight = tensor.to(dtype).to(device)
     dq_weight = fake_qweight * inv_scale
@@ -47,10 +43,9 @@ def create_per_tensor_scale_param(
     output_partition_sizes: List[int],
     **extra_weight_attrs,
 ) -> Parameter:
-    scale = Parameter(
-        torch.empty(len(output_partition_sizes), dtype=torch.float32),
-        requires_grad=False,
-    )
+    scale = Parameter(torch.empty(len(output_partition_sizes),
+                                  dtype=torch.float32),
+                      requires_grad=False)
     scale[:] = torch.finfo(torch.float32).min
     set_weight_attrs(scale, {
         "needs_scalar_to_array": True,
@@ -61,10 +56,9 @@ def create_per_tensor_scale_param(
 
 def create_per_channel_scale_param(output_partition_sizes: List[int],
                                    **extra_weight_attrs) -> Parameter:
-    scale = Parameter(
-        torch.empty((sum(output_partition_sizes), 1), dtype=torch.float32),
-        requires_grad=False,
-    )
+    scale = Parameter(torch.empty((sum(output_partition_sizes), 1),
+                                  dtype=torch.float32),
+                      requires_grad=False)
     scale[:] = torch.finfo(torch.float32).min
     set_weight_attrs(scale, {"output_dim": 0, **extra_weight_attrs})
     return scale
@@ -74,11 +68,9 @@ def convert_to_channelwise(
         weight_scale: torch.Tensor,
         logical_widths: List[int]) -> Tuple[torch.Tensor, torch.Tensor]:
     # Create channelwise buffer
-    weight_scale_channel = torch.empty(
-        (sum(logical_widths), 1),
-        dtype=torch.float32,
-        device=weight_scale.device,
-    )
+    weight_scale_channel = torch.empty((sum(logical_widths), 1),
+                                       dtype=torch.float32,
+                                       device=weight_scale.device)
 
     # Expand each scale to match the size of each logical matrix.
     start = 0
@@ -95,18 +87,16 @@ def requantize_with_max_scale(
         logical_widths: List[int]) -> Tuple[torch.Tensor, torch.Tensor]:
     # Max scale to be used for requanitzation.
     max_w_scale = weight_scale.max()
-    if (current_platform.is_hpu() and htexp._get_device_type()
-            == htexp.synDeviceType.synDeviceGaudi2):
-        max_w_scale = max_w_scale * (torch.finfo(torch.float8_e4m3fn).max /
-                                     torch.finfo(torch.float8_e4m3fnuz).max)
+    if current_platform.is_hpu() and htexp._get_device_type() == htexp.synDeviceType.synDeviceGaudi2:
+        max_w_scale = max_w_scale * (torch.finfo(torch.float8_e4m3fn).max/torch.finfo(torch.float8_e4m3fnuz).max)
     # QKV / MLP is fused in the on disk checkpoint if any of the
     # weight scales are still set to the default since we initialize
     # N weight scales for N shards but we only load 1 weight scale
     # from disk in this case. Skip requantization in this case (since)
     # we already are quantized with the single scale.
     # * Sample Model: nm-testing/Phi-3-mini-128k-instruct-FP8
-    unfused_module_in_checkpoint = (weight_scale[-1]
-                                    > torch.finfo(torch.float8_e4m3fn).min)
+    unfused_module_in_checkpoint = (weight_scale[-1] > torch.finfo(
+        torch.float8_e4m3fn).min)
 
     # If unfused checkpoint, need requanize with the single scale.
     if unfused_module_in_checkpoint:
@@ -142,18 +132,15 @@ def apply_fp8_linear(
             input,
             input_scale,
             scale_ub=input_scale_ub,
-            use_per_token_if_dynamic=use_per_token_if_dynamic,
-        )
+            use_per_token_if_dynamic=use_per_token_if_dynamic)
 
         # Fused GEMM_DQ
-        return ops.cutlass_scaled_mm(
-            qinput,
-            weight,
-            out_dtype=input.dtype,
-            scale_a=x_scale,
-            scale_b=weight_scale,
-            bias=bias,
-        )
+        return ops.cutlass_scaled_mm(qinput,
+                                     weight,
+                                     out_dtype=input.dtype,
+                                     scale_a=x_scale,
+                                     scale_b=weight_scale,
+                                     bias=bias)
 
     # torch.scaled_mm supports per tensor weights + activations only
     # so fallback to naive if per channel or per token
@@ -165,37 +152,26 @@ def apply_fp8_linear(
             input,
             input_scale,
             batch_dim_padding=17,
-            use_per_token_if_dynamic=use_per_token_if_dynamic,
-        )
+            use_per_token_if_dynamic=use_per_token_if_dynamic)
 
-        per_tensor_weights = weight_scale.numel() == 1
-        per_tensor_activations = x_scale.numel() == 1
+        per_tensor_weights = (weight_scale.numel() == 1)
+        per_tensor_activations = (x_scale.numel() == 1)
 
         if per_tensor_weights and per_tensor_activations:
             # Fused GEMM_DQ
             if current_platform.is_hpu():
-                # hpu does not support torch._scaled_mm (SW-197036)
-                output = torch.ops.hpu.fp8_gemm_v2(
-                    qinput,
-                    False,
-                    weight,
-                    False,
-                    None,
-                    input.dtype,
-                    x_scale,
-                    weight_scale,
-                    None,
-                    False,
-                )
+                #hpu does not support torch._scaled_mm (SW-197036)
+                output = torch.ops.hpu.fp8_gemm_v2(qinput, False, weight,
+                                                   False, None, input.dtype,
+                                                   x_scale, weight_scale, None,
+                                                   False)
             else:
-                output, _ = torch._scaled_mm(
-                    qinput,
-                    weight,
-                    out_dtype=input.dtype,
-                    scale_a=x_scale,
-                    scale_b=weight_scale,
-                    bias=bias,
-                )
+                output, _ = torch._scaled_mm(qinput,
+                                             weight,
+                                             out_dtype=input.dtype,
+                                             scale_a=x_scale,
+                                             scale_b=weight_scale,
+                                             bias=bias)
             return torch.narrow(output, 0, 0, input.shape[0])
 
         else:
@@ -243,11 +219,9 @@ def apply_int8_linear(
     # * static, layer.input_scale is scalar and x_scale is input_scale.
     x_q, x_scale = ops.scaled_int8_quant(input, input_scale)
 
-    return ops.cutlass_scaled_mm(
-        x_q,
-        weight,
-        scale_a=x_scale,
-        scale_b=weight_scale,
-        out_dtype=input.dtype,
-        bias=bias,
-    )
+    return ops.cutlass_scaled_mm(x_q,
+                                 weight,
+                                 scale_a=x_scale,
+                                 scale_b=weight_scale,
+                                 out_dtype=input.dtype,
+                                 bias=bias)

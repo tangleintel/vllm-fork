@@ -21,7 +21,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Inference-only LLaMA model compatible with HuggingFace weights."""
-
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 import torch
@@ -55,7 +54,7 @@ from vllm.utils import is_hip
 
 from .interfaces import SupportsLoRA
 from .utils import PPMissingLayer, is_pp_missing_parameter, make_layers
-
+from vllm.platforms import current_platform
 if current_platform.is_hpu():
     import habana_frameworks.torch.core as htcore
 
@@ -77,15 +76,12 @@ class LlamaMLP(nn.Module):
             output_sizes=[intermediate_size] * 2,
             bias=bias,
             quant_config=quant_config,
-            prefix=f"{prefix}.gate_up_proj",
-        )
-        self.down_proj = RowParallelLinear(
-            input_size=intermediate_size,
-            output_size=hidden_size,
-            bias=bias,
-            quant_config=quant_config,
-            prefix=f"{prefix}.down_proj",
-        )
+            prefix=f"{prefix}.gate_up_proj")
+        self.down_proj = RowParallelLinear(input_size=intermediate_size,
+                                           output_size=hidden_size,
+                                           bias=bias,
+                                           quant_config=quant_config,
+                                           prefix=f"{prefix}.down_proj")
         if hidden_act != "silu":
             raise ValueError(f"Unsupported activation: {hidden_act}. "
                              "Only silu is supported for now.")
@@ -163,14 +159,12 @@ class LlamaAttention(nn.Module):
             base=rope_theta,
             rope_scaling=rope_scaling,
         )
-        self.attn = Attention(
-            self.num_heads,
-            self.head_dim,
-            self.scaling,
-            num_kv_heads=self.num_kv_heads,
-            cache_config=cache_config,
-            quant_config=quant_config,
-        )
+        self.attn = Attention(self.num_heads,
+                              self.head_dim,
+                              self.scaling,
+                              num_kv_heads=self.num_kv_heads,
+                              cache_config=cache_config,
+                              quant_config=quant_config)
 
     def forward(
         self,
@@ -279,8 +273,8 @@ class LlamaModel(nn.Module):
         super().__init__()
         self.config = config
         self.padding_idx = config.pad_token_id
-        lora_vocab = ((lora_config.lora_extra_vocab_size *
-                       (lora_config.max_loras or 1)) if lora_config else 0)
+        lora_vocab = (lora_config.lora_extra_vocab_size *
+                      (lora_config.max_loras or 1)) if lora_config else 0
         self.vocab_size = config.vocab_size + lora_vocab
         self.org_vocab_size = config.vocab_size
         if get_pp_group().is_first_rank or (config.tie_word_embeddings
@@ -294,14 +288,11 @@ class LlamaModel(nn.Module):
             self.embed_tokens = PPMissingLayer()
         self.start_layer, self.end_layer, self.layers = make_layers(
             config.num_hidden_layers,
-            lambda prefix: LlamaDecoderLayer(
-                config=config,
-                cache_config=cache_config,
-                quant_config=quant_config,
-                prefix=prefix,
-            ),
-            prefix=f"{prefix}.layers",
-        )
+            lambda prefix: LlamaDecoderLayer(config=config,
+                                             cache_config=cache_config,
+                                             quant_config=quant_config,
+                                             prefix=prefix),
+            prefix=f"{prefix}.layers")
         if get_pp_group().is_last_rank:
             self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         else:
@@ -330,9 +321,8 @@ class LlamaModel(nn.Module):
             hidden_states = intermediate_tensors["hidden_states"]
             residual = intermediate_tensors["residual"]
 
-        if current_platform.is_hpu():
+        if is_hpu:
             import habana_frameworks.torch as htorch
-
             htorch.core.mark_step()
         for i in range(self.start_layer, self.end_layer):
             layer = self.layers[i]
@@ -343,7 +333,7 @@ class LlamaModel(nn.Module):
                 attn_metadata,
                 residual,
             )
-            if current_platform.is_hpu():
+            if is_hpu:
                 htorch.core.mark_step()
 
         if not get_pp_group().is_last_rank:
@@ -371,12 +361,8 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA):
 
     # LoRA specific attributes
     supported_lora_modules = [
-        "qkv_proj",
-        "o_proj",
-        "gate_up_proj",
-        "down_proj",
-        "embed_tokens",
-        "lm_head",
+        "qkv_proj", "o_proj", "gate_up_proj", "down_proj", "embed_tokens",
+        "lm_head"
     ]
     embedding_modules = {
         "embed_tokens": "input_embeddings",
@@ -404,13 +390,11 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA):
         self.config = config
         self.lora_config = lora_config
 
-        self.model = LlamaModel(
-            config,
-            cache_config,
-            quant_config,
-            lora_config=lora_config,
-            prefix="model",
-        )
+        self.model = LlamaModel(config,
+                                cache_config,
+                                quant_config,
+                                lora_config=lora_config,
+                                prefix="model")
         if get_pp_group().is_last_rank:
             self.unpadded_vocab_size = config.vocab_size
             if lora_config:
@@ -443,16 +427,11 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA):
         kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
         intermediate_tensors: Optional[IntermediateTensors] = None,
-        input_embeds: Optional[torch.Tensor] = None,
+        input_embeds: Optional[torch.Tensor] = None
     ) -> Union[torch.Tensor, IntermediateTensors]:
-        model_output = self.model(
-            input_ids,
-            positions,
-            kv_caches,
-            attn_metadata,
-            intermediate_tensors,
-            input_embeds,
-        )
+        model_output = self.model(input_ids, positions, kv_caches,
+                                  attn_metadata, intermediate_tensors,
+                                  input_embeds)
         return model_output
 
     def compute_logits(self, hidden_states: torch.Tensor,
@@ -474,17 +453,13 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA):
             device: torch.device) -> IntermediateTensors:
         return IntermediateTensors({
             "hidden_states":
-            torch.zeros(
-                (batch_size, self.config.hidden_size),
-                dtype=dtype,
-                device=device,
-            ),
+            torch.zeros((batch_size, self.config.hidden_size),
+                        dtype=dtype,
+                        device=device),
             "residual":
-            torch.zeros(
-                (batch_size, self.config.hidden_size),
-                dtype=dtype,
-                device=device,
-            ),
+            torch.zeros((batch_size, self.config.hidden_size),
+                        dtype=dtype,
+                        device=device),
         })
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
@@ -513,7 +488,7 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA):
                 loaded_weight = loaded_weight[0]
                 weight_loader(param, loaded_weight)
                 continue
-            for param_name, weight_name, shard_id in stacked_params_mapping:
+            for (param_name, weight_name, shard_id) in stacked_params_mapping:
                 if weight_name not in name:
                     continue
                 name = name.replace(weight_name, param_name)
@@ -556,12 +531,9 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA):
         tp_size = get_tensor_model_parallel_world_size()
         tp_rank = get_tensor_model_parallel_rank()
         for layer_idx, scaling_factor in kv_cache_scales_loader(
-                quantization_param_path,
-                tp_rank,
-                tp_size,
+                quantization_param_path, tp_rank, tp_size,
                 self.config.num_hidden_layers,
-                self.config.__class__.model_type,
-        ):
+                self.config.__class__.model_type):
             if not isinstance(self.model.layers[layer_idx], nn.Identity):
                 layer_self_attn = self.model.layers[layer_idx].self_attn
 

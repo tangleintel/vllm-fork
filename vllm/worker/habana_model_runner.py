@@ -60,12 +60,10 @@ _PAD_BLOCK_ID = 0
 LORA_WARMUP_RANK = 8
 
 
-def subtuple(
-    obj: object,
-    typename: str,
-    to_copy: List[str],
-    to_override: Optional[Dict[str, object]] = None,
-):
+def subtuple(obj: object,
+             typename: str,
+             to_copy: List[str],
+             to_override: Optional[Dict[str, object]] = None):
     if obj is None:
         return None
     if to_override is None:
@@ -74,7 +72,7 @@ def subtuple(
     values = {f: to_override.get(f, getattr(obj, f)) for f in fields}
     if typename not in _TYPE_CACHE:
         _TYPE_CACHE[typename] = collections.namedtuple(typename,
-                                                       " ".join(fields))
+                                                       ' '.join(fields))
     return _TYPE_CACHE[typename](**values)
 
 
@@ -86,14 +84,14 @@ def read_bucket_settings(phase: str, dim: str, **defaults):
     param is either 'min', 'step' or 'max'
     example env variable: VLLM_DECODE_BS_BUCKET_STEP=128
     """
-    params = ["min", "step", "max"]
-    env_vars = [f"VLLM_{phase}_{dim}_BUCKET_{p}".upper() for p in params]
+    params = ['min', 'step', 'max']
+    env_vars = [f'VLLM_{phase}_{dim}_BUCKET_{p}'.upper() for p in params]
     default_values = [defaults[p] for p in params]
     values = [
         int(os.environ.get(e, d)) for e, d in zip(env_vars, default_values)
     ]
     for e, v, d in zip(env_vars, values, defaults):
-        logger.info("%s=%s (default:%s)", e, v, d)
+        logger.info('%s=%s (default:%s)', e, v, d)
     return values
 
 
@@ -101,7 +99,7 @@ def warmup_range(config: Tuple[int, int, int]):
     """Generate a warmup range.
 
     Start from bmin and multiply by 2 until you reach bstep.
-    Then, increase the values in the range by the value of bstep until you
+    Then, increase the values in the range by the value of bstep until you 
     reach bmax.
 
     Example:
@@ -116,8 +114,8 @@ def warmup_range(config: Tuple[int, int, int]):
                           "set VLLM_SKIP_WARMUP=true")
     base = itertools.repeat(2)
     ramp_up_acc = itertools.accumulate(base, func=operator.mul, initial=bmin)
-    ramp_up_tw = itertools.takewhile(lambda x: x < bstep and x <= bmax,
-                                     ramp_up_acc)
+    ramp_up_tw = itertools.takewhile(lambda x: x < bstep and x <= bmax, \
+        ramp_up_acc)
     stable = range(bstep, bmax + 1, bstep)
     buckets = list(ramp_up_tw) + list(stable)
     return list(filter(lambda bucket: bucket >= bmin, buckets))
@@ -142,8 +140,7 @@ def generate_prompt_buckets(bs_bucket_config,
         filtered_buckets = list(
             filter(
                 lambda bucket: bucket[0] * bucket[1] <= max_num_batched_tokens,
-                buckets,
-            ))
+                buckets))
 
         if len(filtered_buckets) == 0:
             # we can handle this if we ignore max_num_batched_tokens
@@ -208,29 +205,28 @@ def align_workers(value, op):
     world_size = torch.distributed.get_world_size()
     if world_size <= 1:
         return value
-    value_t = torch.tensor(value, device="cpu")
+    value_t = torch.tensor(value, device='cpu')
     torch.distributed.all_reduce(value_t, op=op, group=group)
     return value_t.item()
 
 
 def setup_profiler():
     schedule = torch.profiler.schedule(wait=0, warmup=2, active=1, repeat=1)
-    DEVICE = "hpu"
+    DEVICE = 'hpu'
     activities = [torch.profiler.ProfilerActivity.CPU]
     activities.extend([torch.profiler.ProfilerActivity.HPU] if DEVICE ==
-                      "hpu" else [])
-    # from habana_frameworks.torch.activity_profiler import DebugActivity
-    # debug_activities=[DebugActivity.BRIDGE_FUNCTION_CALLS]
+                      'hpu' else [])
+    #from habana_frameworks.torch.activity_profiler import DebugActivity
+    #debug_activities=[DebugActivity.BRIDGE_FUNCTION_CALLS]
 
     profiler = torch.profiler.profile(
         schedule=schedule,
         activities=activities,
-        # debug_activities=debug_activities,
-        on_trace_ready=torch.profiler.tensorboard_trace_handler(".",
+        #debug_activities=debug_activities,
+        on_trace_ready=torch.profiler.tensorboard_trace_handler('.',
                                                                 use_gzip=True),
         record_shapes=False,
-        with_stack=True,
-    )
+        with_stack=True)
     return profiler
 
 
@@ -240,17 +236,17 @@ def pad_list(list, k, v):
     return list + [v] * padding
 
 
-class HpuModelAdapter:
+class HpuModelAdapter():
 
     def __init__(self, model, block_size, dtype, enforce_eager):
         self.model = model
-        self.prefill_use_fusedsdpa = os.getenv("VLLM_PROMPT_USE_FUSEDSDPA",
-                                               "0").lower() in ["1", "true"]
+        self.prefill_use_fusedsdpa = os.getenv('VLLM_PROMPT_USE_FUSEDSDPA',
+                                               '0').lower() in ['1', 'true']
         self.block_size = block_size
         self.dtype = dtype
         if not htorch.utils.internal.is_lazy() and not enforce_eager:
             self.model = torch.compile(self.model,
-                                       backend="hpu_backend",
+                                       backend='hpu_backend',
                                        dynamic=False)
 
     def _set_attn_bias(self, attn_metadata, batch_size, seq_len, device,
@@ -264,17 +260,13 @@ class HpuModelAdapter:
                                  dtype=torch.int32).view(1, seq_len).ge(
                                      seq_lens_t.unsqueeze(-1)).view(
                                          batch_size, 1, 1, seq_len))
-        causal_mask = torch.triu(
-            torch.ones(
-                (batch_size, 1, seq_len, seq_len),
-                device=device,
-                dtype=torch.bool,
-            ),
-            diagonal=1,
-        )
+        causal_mask = torch.triu(torch.ones((batch_size, 1, seq_len, seq_len),
+                                            device=device,
+                                            dtype=torch.bool),
+                                 diagonal=1)
         mask = causal_mask.logical_or(len_mask)
-        attn_bias = torch.zeros_like(mask, dtype=dtype).masked_fill_(
-            mask, -math.inf)
+        attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
+            mask, -math.inf))
         attn_metadata = prefill_metadata._replace(attn_bias=attn_bias)
         return attn_metadata
 
@@ -284,8 +276,8 @@ class HpuModelAdapter:
                             device=device,
                             dtype=torch.int32).unsqueeze(0)
         mask = mask >= metadata.block_usage.unsqueeze(-1)
-        attn_bias = torch.zeros_like(mask, dtype=dtype).masked_fill_(
-            mask, -math.inf)
+        attn_bias = (torch.zeros_like(mask, dtype=dtype).masked_fill_(
+            mask, -math.inf))
         block_mapping = torch.nn.functional.one_hot(
             metadata.block_mapping.to(torch.long),
             num_classes=batch_size).to(dtype)
@@ -307,18 +299,14 @@ class HpuModelAdapter:
 
     def forward(self, *args, **kwargs):
         kwargs = kwargs.copy()
-        selected_token_indices = kwargs.pop("selected_token_indices")
-        if "warmup_mode" in kwargs:
-            kwargs.pop("warmup_mode")
-        input_ids = kwargs["input_ids"]
-        kwargs["attn_metadata"] = self._update_metadata(
-            kwargs["attn_metadata"],
-            input_ids.size(0),
-            input_ids.size(1),
-            input_ids.device,
-            self.dtype,
-        )
-        LoraMask.setLoraMask(kwargs.pop("lora_mask"))
+        selected_token_indices = kwargs.pop('selected_token_indices')
+        if 'warmup_mode' in kwargs:
+            kwargs.pop('warmup_mode')
+        input_ids = kwargs['input_ids']
+        kwargs['attn_metadata'] = self._update_metadata(
+            kwargs['attn_metadata'], input_ids.size(0), input_ids.size(1),
+            input_ids.device, self.dtype)
+        LoraMask.setLoraMask(kwargs.pop('lora_mask'))
         hidden_states = self.model(*args, **kwargs)
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
         hidden_states = hidden_states.index_select(0, selected_token_indices)
@@ -347,20 +335,18 @@ class PreparePromptMetadata(NamedTuple):
 
     @classmethod
     def empty(cls):
-        return PreparePromptMetadata(
-            input_tokens=[],
-            input_positions=[],
-            attn_metadata=None,
-            seq_lens=[],
-            query_lens=[],
-            lora_index_mapping=[],
-            lora_prompt_mapping=[],
-            lora_requests=set(),
-            multi_modal_input=None,
-            slot_mapping=[],
-            lora_mask=None,
-            lora_logits_mask=None,
-        )
+        return PreparePromptMetadata(input_tokens=[],
+                                     input_positions=[],
+                                     attn_metadata=None,
+                                     seq_lens=[],
+                                     query_lens=[],
+                                     lora_index_mapping=[],
+                                     lora_prompt_mapping=[],
+                                     lora_requests=set(),
+                                     multi_modal_input=None,
+                                     slot_mapping=[],
+                                     lora_mask=None,
+                                     lora_logits_mask=None)
 
 
 class PrepareDecodeMetadata(NamedTuple):
@@ -376,17 +362,15 @@ class PrepareDecodeMetadata(NamedTuple):
 
     @classmethod
     def empty(cls):
-        return PrepareDecodeMetadata(
-            input_tokens=[],
-            input_positions=[],
-            attn_metadata=None,
-            lora_index_mapping=[],
-            lora_prompt_mapping=[],
-            lora_requests=set(),
-            slot_mapping=[],
-            lora_mask=None,
-            lora_logits_mask=None,
-        )
+        return PrepareDecodeMetadata(input_tokens=[],
+                                     input_positions=[],
+                                     attn_metadata=None,
+                                     lora_index_mapping=[],
+                                     lora_prompt_mapping=[],
+                                     lora_requests=set(),
+                                     slot_mapping=[],
+                                     lora_mask=None,
+                                     lora_logits_mask=None)
 
 
 # How batches are constructed.
@@ -399,7 +383,7 @@ class BatchType(IntEnum):
     MIXED = 2
 
 
-TModelInputForHPU = TypeVar("TModelInputForHPU", bound="ModelInputForHPU")
+TModelInputForHPU = TypeVar('TModelInputForHPU', bound="ModelInputForHPU")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -410,7 +394,6 @@ class ModelInputForHPU(ModelRunnerInputBase):
     runners that run additional steps should subclass this method to add
     additional fields.
     """
-
     input_tokens: Optional[torch.Tensor] = None
     input_positions: Optional[torch.Tensor] = None
     seq_lens: Optional[List[int]] = None
@@ -458,7 +441,6 @@ class ModelInputForHPUWithSamplingMetadata(ModelInputForHPU):
     """
     Used by the ModelRunner.
     """
-
     sampling_metadata: Optional["SamplingMetadata"] = None
     # Used for speculative decoding. We do not broadcast it because it is only
     # used by the driver worker.
@@ -497,7 +479,6 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     """
     Helper class for shared methods between GPU model runners.
     """
-
     _model_input_cls: Type[TModelInputForHPU]
 
     def __init__(
@@ -531,8 +512,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.enforce_eager = self.model_config.enforce_eager
         self.max_num_seqs = self.scheduler_config.max_num_seqs
         self.max_model_len = self.scheduler_config.max_model_len
-        self.max_num_batched_tokens = (
-            self.scheduler_config.max_num_batched_tokens)
+        self.max_num_batched_tokens = \
+            self.scheduler_config.max_num_batched_tokens
         self.block_size = cache_config.block_size
 
         self.pin_memory = is_pin_memory_available()
@@ -570,9 +551,9 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         requested_gc_thrs = [0] * len(default_gc_thrs)
         for i in range(len(default_gc_thrs)):
             requested_gc_thrs[i] = int(
-                os.environ.get(f"VLLM_GC_THR_GEN{i}", default_gc_thrs[i]))
+                os.environ.get(f'VLLM_GC_THR_GEN{i}', default_gc_thrs[i]))
         if requested_gc_thrs == default_gc_thrs:
-            gc_thr_multiplier = int(os.environ.get("VLLM_GC_THR_MULTIPLIER",
+            gc_thr_multiplier = int(os.environ.get('VLLM_GC_THR_MULTIPLIER',
                                                    2))
             requested_gc_thrs = [
                 t * gc_thr_multiplier for t in default_gc_thrs
@@ -581,7 +562,6 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def load_model(self) -> None:
         import habana_frameworks.torch.core as htcore
-
         htcore.hpu_set_env()
         with HabanaMemoryProfiler() as m:
             with HabanaMemoryProfiler() as m_getmodel:
@@ -593,17 +573,16 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     multimodal_config=self.multimodal_config,
                     parallel_config=self.parallel_config,
                     scheduler_config=self.scheduler_config,
-                    cache_config=self.cache_config,
-                )
+                    cache_config=self.cache_config)
             msg = ("Pre-loading model weights on "
                    f"{next(self.model.parameters()).device} "
                    f"took {m_getmodel.get_summary_string()}")
             logger.info(msg)
 
             if self.lora_config:
-                assert (hasattr(self.model, "supported_lora_modules")
-                        and self.model.supported_lora_modules
-                        ), "Model does not support LoRA"
+                assert hasattr(self.model, "supported_lora_modules"
+                               ) and self.model.supported_lora_modules, (
+                                   "Model does not support LoRA")
                 assert hasattr(self.model, "embedding_modules"
                                ), "Model does not have embedding_modules"
                 assert hasattr(
@@ -612,20 +591,16 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 self.lora_manager = LRUCacheWorkerLoRAManager(
                     self.scheduler_config.max_num_seqs,
                     self.scheduler_config.max_num_batched_tokens,
-                    self.vocab_size,
-                    self.lora_config,
-                    self.device,
+                    self.vocab_size, self.lora_config, self.device,
                     self.model.embedding_modules,
-                    self.model.embedding_padding_modules,
-                )
+                    self.model.embedding_padding_modules)
                 self.model = self.lora_manager.create_lora_manager(self.model)
 
-            if self.model_config.quantization == "inc":
+            if self.model_config.quantization == 'inc':
                 logger.info("Preparing model with INC..")
                 with HabanaMemoryProfiler() as m_inc:
                     from neural_compressor.torch.quantization import (
                         FP8Config, convert, prepare)
-
                     config = FP8Config.from_json_file(
                         os.getenv("QUANT_CONFIG", ""))
                     if config.measure:
@@ -634,10 +609,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         self.model = convert(self.model, config)
                     htcore.hpu_initialize(self.model,
                                           mark_only_scales_as_const=True)
-                logger.info(
-                    "Preparing model with INC took %s",
-                    m_inc.get_summary_string(),
-                )
+                logger.info("Preparing model with INC took %s",
+                            m_inc.get_summary_string())
             else:
                 self.model = self.model.to("hpu")
                 htcore.mark_step()
@@ -648,8 +621,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     self.model,
                     self.block_size,
                     dtype=self.model_config.dtype,
-                    enforce_eager=self.enforce_eager,
-                )
+                    enforce_eager=self.enforce_eager)
             msg = f"Wrapping in HPU Graph took {m_wrap.get_summary_string()}"
             logger.info(msg)
 
@@ -668,44 +640,36 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
     def _setup_buckets(self) -> None:
         align_bs = lambda x: min(self.max_num_seqs, x)
         max_bucket_cfg = 64
-        if (self.lora_config and max_bucket_cfg
-                > self.max_num_batched_tokens // self.block_size):
+        if self.lora_config and \
+            max_bucket_cfg > self.max_num_batched_tokens // self.block_size:
             max_bucket_cfg = self.max_num_batched_tokens // self.block_size
         blocks_step = 128
-        # FIXME: The default values should be max_model_len
+        #FIXME: The default values should be max_model_len
         max_prompt_seq = 1024
         max_decode_seq = 2048
         self.prompt_bs_bucket_cfg = read_bucket_settings(
-            "prompt",
-            "bs",
+            'prompt',
+            'bs',
             min=1,
             step=align_bs(32),
-            max=align_bs(max_bucket_cfg),
-        )
-        self.decode_bs_bucket_cfg = read_bucket_settings(
-            "decode",
-            "bs",
-            min=align_bs(32),
-            step=align_bs(32),
-            max=self.max_num_seqs,
-        )
-        self.prompt_seq_bucket_cfg = read_bucket_settings(
-            "prompt",
-            "seq",
-            min=self.block_size,
-            step=self.block_size,
-            max=max_prompt_seq,
-        )
+            max=align_bs(max_bucket_cfg))
+        self.decode_bs_bucket_cfg = read_bucket_settings('decode',
+                                                         'bs',
+                                                         min=align_bs(32),
+                                                         step=align_bs(32),
+                                                         max=self.max_num_seqs)
+        self.prompt_seq_bucket_cfg = read_bucket_settings('prompt',
+                                                          'seq',
+                                                          min=self.block_size,
+                                                          step=self.block_size,
+                                                          max=max_prompt_seq)
         self.decode_block_bucket_cfg = read_bucket_settings(
-            "decode",
-            "block",
+            'decode',
+            'block',
             min=blocks_step,
             step=blocks_step,
-            max=max(
-                blocks_step,
-                self.max_num_seqs * max_decode_seq // self.block_size,
-            ),
-        )
+            max=max(blocks_step,
+                    self.max_num_seqs * max_decode_seq // self.block_size))
         self.graphed_buckets: Set[Any] = set()
 
         msg = ("Prompt bucket config (min, step, max_warmup) "
@@ -763,9 +727,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             seq_lens.append(seq_len)
 
             # NOTE: This only works for oooooooxxx style attention.
-            if (computed_block_nums is not None
-                    and len(computed_block_nums) > 0
-                    and self.sliding_window is None):
+            if computed_block_nums is not None and len(
+                    computed_block_nums) > 0 and self.sliding_window is None:
                 # Prefix is not supported with sliding_window
                 context_len = len(computed_block_nums) * self.block_size
                 prompt_tokens = prompt_tokens[context_len:]
@@ -843,8 +806,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         max_prompt_len = max(
             find_bucket(max(seq_lens), self.prompt_seq_bucket_cfg),
-            self.block_size,
-        )
+            self.block_size)
 
         lora_mask: torch.Tensor = None
         lora_logits_mask: torch.Tensor = None
@@ -853,24 +815,18 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             lora_mask = torch.zeros(
                 len(seq_group_metadata_list) * max_prompt_len,
                 (self.lora_config.max_loras) * self.lora_config.max_lora_rank,
-                dtype=self.lora_config.lora_dtype,
-            )
-            lora_logits_mask = torch.zeros(
-                len(seq_group_metadata_list),
-                (self.lora_config.max_loras) * self.lora_config.max_lora_rank,
-                dtype=self.lora_config.lora_dtype,
-            )
+                dtype=self.lora_config.lora_dtype)
+            lora_logits_mask = torch.zeros(len(seq_group_metadata_list),
+                                           (self.lora_config.max_loras) *
+                                           self.lora_config.max_lora_rank,
+                                           dtype=self.lora_config.lora_dtype)
 
-            ones = torch.ones(
-                max_prompt_len,
-                self.lora_config.max_lora_rank,
-                dtype=self.lora_config.lora_dtype,
-            )
-            logit_ones = torch.ones(
-                1,
-                self.lora_config.max_lora_rank,
-                dtype=self.lora_config.lora_dtype,
-            )
+            ones = torch.ones(max_prompt_len,
+                              self.lora_config.max_lora_rank,
+                              dtype=self.lora_config.lora_dtype)
+            logit_ones = torch.ones(1,
+                                    self.lora_config.max_lora_rank,
+                                    dtype=self.lora_config.lora_dtype)
         for seq_group_metadata, context_len in zip(seq_group_metadata_list,
                                                    context_lens):
             lora_id = seq_group_metadata.lora_int_id
@@ -892,32 +848,26 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                  if seq_group_metadata.sampling_params.prompt_logprobs else 1))
 
         if lora_mask is not None:
-            lora_mask = lora_mask.to("hpu")
-            lora_logits_mask = lora_logits_mask.to("hpu")
+            lora_mask = lora_mask.to('hpu')
+            lora_logits_mask = lora_logits_mask.to('hpu')
 
-        input_tokens = make_tensor_with_pad(
-            input_tokens,
-            max_len=max_prompt_len,
-            pad=0,
-            dtype=torch.long,
-            device=self.device,
-        )
+        input_tokens = make_tensor_with_pad(input_tokens,
+                                            max_len=max_prompt_len,
+                                            pad=0,
+                                            dtype=torch.long,
+                                            device=self.device)
 
-        input_positions = make_tensor_with_pad(
-            input_positions,
-            max_len=max_prompt_len,
-            pad=0,
-            dtype=torch.long,
-            device=self.device,
-        )
+        input_positions = make_tensor_with_pad(input_positions,
+                                               max_len=max_prompt_len,
+                                               pad=0,
+                                               dtype=torch.long,
+                                               device=self.device)
 
-        slot_mapping = make_tensor_with_pad(
-            slot_mapping,
-            max_len=max_prompt_len,
-            pad=_PAD_SLOT_ID,
-            dtype=torch.long,
-            device=self.device,
-        )
+        slot_mapping = make_tensor_with_pad(slot_mapping,
+                                            max_len=max_prompt_len,
+                                            pad=_PAD_SLOT_ID,
+                                            dtype=torch.long,
+                                            device=self.device)
 
         seq_lens_tensor = torch.tensor(seq_lens,
                                        dtype=torch.long,
@@ -970,16 +920,13 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         counter = 0
 
         if self.lora_config:
-            lora_mask = torch.zeros(
-                len(seq_group_metadata_list),
-                (self.lora_config.max_loras) * self.lora_config.max_lora_rank,
-                dtype=self.lora_config.lora_dtype,
-            )
-            ones = torch.ones(
-                1,
-                self.lora_config.max_lora_rank,
-                dtype=self.lora_config.lora_dtype,
-            )
+            lora_mask = torch.zeros(len(seq_group_metadata_list),
+                                    (self.lora_config.max_loras) *
+                                    self.lora_config.max_lora_rank,
+                                    dtype=self.lora_config.lora_dtype)
+            ones = torch.ones(1,
+                              self.lora_config.max_lora_rank,
+                              dtype=self.lora_config.lora_dtype)
 
         dummy_slots = itertools.cycle(
             range(_PAD_SLOT_ID, _PAD_SLOT_ID + self.block_size))
@@ -1007,8 +954,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 position = seq_len - 1
                 input_positions.append([position])
 
-                seq_len = (seq_len if self.sliding_window is None else min(
-                    seq_len, self.sliding_window))
+                seq_len = seq_len if self.sliding_window is None else min(
+                    seq_len, self.sliding_window)
                 seq_lens.append(seq_len)
 
                 block_table = seq_group_metadata.block_tables[seq_id]
@@ -1029,7 +976,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 block_tables.append(block_table)
 
         if lora_mask is not None:
-            lora_mask = lora_mask.to("hpu")
+            lora_mask = lora_mask.to('hpu')
             lora_logits_mask = lora_mask
         input_tokens = torch.tensor(input_tokens,
                                     dtype=torch.long,
@@ -1119,12 +1066,12 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         self.event_start = self.profiler.get_timestamp_us()
         is_prompt = seq_group_metadata_list[0].is_prompt
-        base_event_name = "prompt" if is_prompt else "decode"
-        self.profiler.start("internal", base_event_name)
+        base_event_name = 'prompt' if is_prompt else 'decode'
+        self.profiler.start('internal', base_event_name)
 
         real_batch_size = len(seq_group_metadata_list)
-        bucket_cfg = (self.prompt_bs_bucket_cfg
-                      if is_prompt else self.decode_bs_bucket_cfg)
+        bucket_cfg = self.prompt_bs_bucket_cfg if is_prompt else \
+            self.decode_bs_bucket_cfg
         batch_size_padded = find_bucket(real_batch_size, bucket_cfg)
         batch_size_padding = batch_size_padded - real_batch_size
         seq_group_metadata_list = seq_group_metadata_list.copy()
@@ -1165,13 +1112,10 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             decode_lora_mask,
             decode_lora_logits_mask,
         ) = self._prepare_decode(decode_reqs)
-        sampling_metadata = SamplingMetadata.prepare(
-            seq_group_metadata_list,
-            seq_lens,
-            query_lens,
-            self.device,
-            self.pin_memory,
-        )
+        sampling_metadata = SamplingMetadata.prepare(seq_group_metadata_list,
+                                                     seq_lens, query_lens,
+                                                     self.device,
+                                                     self.pin_memory)
 
         if not self.scheduler_config.chunked_prefill_enabled:
             assert (len(prefill_reqs) and len(decode_reqs)) == 0
@@ -1204,14 +1148,13 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         paddings = list(itertools.accumulate(paddings))
         paddings_prompt_logprobs = []
         for i, seq_group_metadata in enumerate(seq_group_metadata_list):
-            if (seq_group_metadata.sampling_params.prompt_logprobs is not None
-                    and seq_group_metadata.is_prompt):
-                paddings_prompt_logprobs += [paddings[i]] * seq_lens[i]
+            if seq_group_metadata.sampling_params.prompt_logprobs is not None \
+                              and seq_group_metadata.is_prompt:
+                paddings_prompt_logprobs += ([paddings[i]] * seq_lens[i])
         paddings = torch.tensor(
             paddings_prompt_logprobs if paddings_prompt_logprobs else paddings,
             dtype=sampling_metadata.selected_token_indices.dtype,
-            device=sampling_metadata.selected_token_indices.device,
-        )
+            device=sampling_metadata.selected_token_indices.device)
         sampling_metadata.selected_token_indices.add_(paddings)
 
         if self.lora_config:
@@ -1244,7 +1187,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             "num_prefills": num_prefills,
             "batch_type": batch_type,
             "seq_lens": seq_lens,
-            "query_lens": query_lens,
+            "query_lens": query_lens
         }
         if prefill_attn_metadata is not None:
             metadata_dict.update(prefill_attn_metadata.asdict_zerocopy())
@@ -1252,23 +1195,22 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             assert decode_attn_metadata is not None
             metadata_dict.update(decode_attn_metadata.asdict_zerocopy())
 
-        attn_metadata = (prefill_attn_metadata if prefill_attn_metadata
-                         is not None else decode_attn_metadata)
+        attn_metadata = prefill_attn_metadata if \
+            prefill_attn_metadata is not None else decode_attn_metadata
 
-        return self._model_input_cls(
-            input_tokens=input_tokens,
-            seq_lens=seq_lens,
-            query_lens=query_lens,
-            input_positions=input_positions,
-            attn_metadata=attn_metadata,
-            lora_requests=lora_requests,
-            lora_mapping=lora_mapping,
-            multi_modal_kwargs=multi_modal_input,
-            real_batch_size=real_batch_size,
-            batch_size_padded=batch_size_padded,
-            lora_mask=lora_mask,
-            lora_logits_mask=lora_logits_mask,
-        ), sampling_metadata
+        return self._model_input_cls(input_tokens=input_tokens,
+                                     seq_lens=seq_lens,
+                                     query_lens=query_lens,
+                                     input_positions=input_positions,
+                                     attn_metadata=attn_metadata,
+                                     lora_requests=lora_requests,
+                                     lora_mapping=lora_mapping,
+                                     multi_modal_kwargs=multi_modal_input,
+                                     real_batch_size=real_batch_size,
+                                     batch_size_padded=batch_size_padded,
+                                     lora_mask=lora_mask,
+                                     lora_logits_mask=lora_logits_mask), \
+                                        sampling_metadata
 
     def _seq_len(self, attn_metadata):
         if attn_metadata.num_prefills != 0:
@@ -1297,19 +1239,10 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # input_hash(torch.tensor(123)) == input_hash(torch.tensor(321))
         # input_hash(123) != input_hash(321)
         # input_hash("abc") != input_hash("cba")
-        attention_metadata = subtuple(
-            metadata,
-            "TrimmedAttentionMetadata",
-            [
-                "attn_bias",
-                "seq_lens_tensor",
-                "block_list",
-                "block_mapping",
-                "block_usage",
-                "slot_mapping",
-                "is_prompt",
-            ],
-        )
+        attention_metadata = subtuple(metadata, 'TrimmedAttentionMetadata', [
+            'attn_bias', 'seq_lens_tensor', 'block_list', 'block_mapping',
+            'block_usage', 'slot_mapping', 'is_prompt'
+        ])
         return attention_metadata
 
     def create_dummy_seq_group_metadata(self,
@@ -1331,23 +1264,19 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         output_token_ids = [1] * output_len
         seq_data = SequenceData(prompt_token_ids)
         seq_data.output_token_ids = output_token_ids
-        return SequenceGroupMetadata(
-            request_id=str(group_id),
-            is_prompt=(output_len == 0),
-            seq_data={group_id: seq_data},
-            sampling_params=sampling_params,
-            block_tables=block_tables,
-            lora_request=lora_request,
-        )
+        return SequenceGroupMetadata(request_id=str(group_id),
+                                     is_prompt=(output_len == 0),
+                                     seq_data={group_id: seq_data},
+                                     sampling_params=sampling_params,
+                                     block_tables=block_tables,
+                                     lora_request=lora_request)
 
     def profile_run(self) -> None:
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         kv_caches = [None] * num_layers
         max_batch_size = self.prompt_bs_bucket_cfg[-1]
-        max_seq_len = min(
-            self.prompt_seq_bucket_cfg[-1],
-            self.max_num_batched_tokens // max_batch_size,
-        )
+        max_seq_len = min(self.prompt_seq_bucket_cfg[-1],
+                          self.max_num_batched_tokens // max_batch_size)
 
         self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches)
         return
@@ -1388,7 +1317,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     dummy_lora_requests[idx % len(dummy_lora_requests)]
                     for idx in range(max_num_seqs)
                 ]
-        self.profiler.start("internal", scenario_name)
+        self.profiler.start('internal', scenario_name)
         times = 3 if use_graphs or is_profile_run else 1
         if self.lora_config and not is_profile_run:
             lora_mapping = LoRAMapping(
@@ -1403,8 +1332,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     seq_len,
                     is_prompt,
                     lora_request=dummy_lora_requests_per_seq[i]
-                    if dummy_lora_requests_per_seq else None,
-                ) for i in range(batch_size)
+                    if dummy_lora_requests_per_seq else None)
+                for i in range(batch_size)
             ]
         else:
             # FIXME: seq_len is actually number of blocks
@@ -1416,8 +1345,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     b * self.block_size - 1,
                     is_prompt,
                     lora_request=dummy_lora_requests_per_seq[i]
-                    if dummy_lora_requests_per_seq else None,
-                ) for i, b in enumerate(blocks)
+                    if dummy_lora_requests_per_seq else None)
+                for i, b in enumerate(blocks)
             ]
         torch.hpu.synchronize()
         profiler = None
@@ -1480,40 +1409,31 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
     def warmup_all_buckets(self, buckets, is_prompt, kv_caches):
         for i, (batch_size, seq_len) in enumerate(reversed(buckets)):
-            self.log_warmup(
-                "Prompt" if is_prompt else "Decode",
-                i,
-                len(buckets),
-                batch_size,
-                seq_len,
-            )
+            self.log_warmup('Prompt' if is_prompt else 'Decode', i,
+                            len(buckets), batch_size, seq_len)
             self.warmup_scenario(batch_size, seq_len, is_prompt, kv_caches)
 
-    def warmup_graphs(
-        self,
-        strategy,
-        buckets,
-        is_prompt,
-        kv_caches,
-        available_mem,
-        starting_mem=0,
-        total_batch_seq=0.001,
-    ):
+    def warmup_graphs(self,
+                      strategy,
+                      buckets,
+                      is_prompt,
+                      kv_caches,
+                      available_mem,
+                      starting_mem=0,
+                      total_batch_seq=0.001):
         total_mem = starting_mem
         idx = 0
         phase = f'Graph/{"Prompt" if is_prompt else "Decode"}'
         num_candidates = len(buckets)
-        ordering: Union[
-            Callable[[Any], Tuple[Any, Any]],
-            Callable[[Any], Tuple[Any, Any, Any]],
-        ]
-        if strategy == "min_tokens":
+        ordering : Union[Callable[[Any], Tuple[Any, Any]], \
+            Callable[[Any], Tuple[Any, Any, Any]]]
+        if strategy == 'min_tokens':
             ordering = lambda b: (b[0] * b[1], b[1], b[0])
-        elif strategy == "max_bs":
+        elif strategy == 'max_bs':
             ordering = lambda b: (-b[0], b[1])
         else:
             raise NotImplementedError(
-                f"Unsupported graph allocation strategy: {strategy}")
+                f'Unsupported graph allocation strategy: {strategy}')
         buckets = list(sorted(buckets, key=ordering))
         captured_all = True
         for idx, (batch_size, seq_len) in enumerate(buckets):
@@ -1545,34 +1465,32 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                        if c[2] == is_prompt)
         if num_candidates == 0:
             num_candidates = 1
-        msg = (f"{phase} captured:{len(graphed)} "
-               f"({100 * len(graphed) / num_candidates:.1f}%) "
-               f"used_mem:{format_bytes(total_mem)} "
-               f"buckets:{sorted(list(graphed))}")
+        msg = (f'{phase} captured:{len(graphed)} '
+               f'({100 * len(graphed) / num_candidates:.1f}%) '
+               f'used_mem:{format_bytes(total_mem)} '
+               f'buckets:{sorted(list(graphed))}')
         logger.info(msg)
 
     @torch.inference_mode()
     def warmup_model(self, kv_caches: List[torch.Tensor]) -> None:
-        if profile := os.environ.get("VLLM_PT_PROFILE", None):
-            phase, bs, seq_len, graph = profile.split("_")
-            is_prompt = phase == "prompt"
-            graphs = graph == "t"
+        if profile := os.environ.get('VLLM_PT_PROFILE', None):
+            phase, bs, seq_len, graph = profile.split('_')
+            is_prompt = phase == 'prompt'
+            graphs = graph == 't'
             if graphs:
                 self.graphed_buckets.add((int(bs), int(seq_len), is_prompt))
             self.warmup_scenario(int(bs), int(seq_len), is_prompt, kv_caches,
                                  True)
             raise AssertionError("Finished profiling")
-        if os.environ.get("VLLM_SKIP_WARMUP", "false").lower() == "true":
+        if os.environ.get('VLLM_SKIP_WARMUP', 'false').lower() == 'true':
             logger.info("Skipping warmup...")
             return
-        self.profiler.start("internal", "warmup")
+        self.profiler.start('internal', 'warmup')
         max_blocks = kv_caches[0][0].size(0)
 
         self.prompt_buckets, prompt_omitted_buckets = generate_prompt_buckets(
-            self.prompt_bs_bucket_cfg,
-            self.prompt_seq_bucket_cfg,
-            self.max_num_batched_tokens,
-        )
+            self.prompt_bs_bucket_cfg, self.prompt_seq_bucket_cfg,
+            self.max_num_batched_tokens)
         if self.lora_config:
             self.prompt_buckets[:] = [
                 bucket for bucket in self.prompt_buckets
@@ -1600,11 +1518,9 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 bucket for bucket in self.decode_buckets
                 if self._is_valid_bucket(bucket)
             ]
-        logger.info(
-            "Generated %d decode buckets [bs, total_blocks]: %s",
-            len(self.decode_buckets),
-            list(sorted(self.decode_buckets)),
-        )
+        logger.info("Generated %d decode buckets [bs, total_blocks]: %s",
+                    len(self.decode_buckets),
+                    list(sorted(self.decode_buckets)))
 
         start_mem = HabanaMemoryProfiler.current_device_memory_usage()
         start_time = time.perf_counter()
@@ -1619,24 +1535,24 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             logger.debug("Using PT_COMPILE_ONLY_MODE.")
         except KeyError:
             can_use_compile_only_mode = False
-            logger.warning("Cannot use PT_COMPILE_ONLY_MODE. "
-                           "Warmup time will be negatively impacted. "
-                           "Please update Gaudi Software Suite.")
-        with compile_only_mode_context() if can_use_compile_only_mode \
-            else contextlib.nullcontext():
+            logger.warning('Cannot use PT_COMPILE_ONLY_MODE. '
+                           'Warmup time will be negatively impacted. '
+                           'Please update Gaudi Software Suite.')
+        with compile_only_mode_context(
+        ) if can_use_compile_only_mode else contextlib.nullcontext():
             self.warmup_all_buckets(self.prompt_buckets, True, kv_caches)
             self.warmup_all_buckets(self.decode_buckets, False, kv_caches)
 
             if not self.enforce_eager and htorch.utils.internal.is_lazy():
-                assert self.mem_margin is not None, (
-                    "HabanaWorker.determine_num_available_blocks needs "
+                assert self.mem_margin is not None, \
+                    ("HabanaWorker.determine_num_available_blocks needs "
                     "to be called before warming up the model.")
                 free_mem = HabanaMemoryProfiler.current_free_device_memory()
                 graph_free_mem = free_mem - self.mem_margin
                 graph_free_mem = align_workers(graph_free_mem,
                                                torch.distributed.ReduceOp.MIN)
                 prompt_graph_mem_ratio = float(
-                    os.environ.get("VLLM_GRAPH_PROMPT_RATIO", "0.5"))
+                    os.environ.get('VLLM_GRAPH_PROMPT_RATIO', '0.5'))
                 prompt_available_memory = (prompt_graph_mem_ratio *
                                            graph_free_mem)
                 decode_available_memory = (graph_free_mem -
@@ -1649,26 +1565,18 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     f"{format_bytes(decode_available_memory)} for decode "
                     f"(VLLM_GRAPH_PROMPT_RATIO={prompt_graph_mem_ratio})")
                 logger.info(msg)
-                prompt_strategy = os.environ.get("VLLM_GRAPH_PROMPT_STRATEGY",
-                                                 "min_tokens")
-                decode_strategy = os.environ.get("VLLM_GRAPH_DECODE_STRATEGY",
-                                                 "max_bs")
-                mem_post_prompt, prompt_batch_seq, prompt_captured_all = (
+                prompt_strategy = os.environ.get('VLLM_GRAPH_PROMPT_STRATEGY',
+                                                 'min_tokens')
+                decode_strategy = os.environ.get('VLLM_GRAPH_DECODE_STRATEGY',
+                                                 'max_bs')
+                mem_post_prompt, prompt_batch_seq, prompt_captured_all = \
                     self.warmup_graphs(
-                        prompt_strategy,
-                        self.prompt_buckets,
-                        True,
-                        kv_caches,
-                        prompt_available_memory,
-                    ))
-                mem_post_decode, decode_batch_seq, decode_captured_all = (
+                    prompt_strategy, self.prompt_buckets, True, kv_caches,
+                    prompt_available_memory)
+                mem_post_decode, decode_batch_seq, decode_captured_all = \
                     self.warmup_graphs(
-                        decode_strategy,
-                        self.decode_buckets,
-                        False,
-                        kv_caches,
-                        decode_available_memory,
-                    ))
+                    decode_strategy, self.decode_buckets, False, kv_caches,
+                    decode_available_memory)
 
                 # Not all prompt buckets were captured, but all decode buckets
                 # were captured and we have some free graph-allocated space
@@ -1677,29 +1585,21 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         and not prompt_captured_all and decode_captured_all):
                     mem_post_prompt, _, prompt_captured_all = (
                         self.warmup_graphs(
-                            prompt_strategy,
-                            self.prompt_buckets,
-                            True,
+                            prompt_strategy, self.prompt_buckets, True,
                             kv_caches,
                             graph_free_mem - mem_post_prompt - mem_post_decode,
-                            mem_post_prompt,
-                            prompt_batch_seq,
-                        ))
+                            mem_post_prompt, prompt_batch_seq))
 
                 # Not all decode buckets were captured, but all prompt buckets
                 # were captured and we have some free graph-allocated space
                 # left. Let's try to use it for capturing more decode buckets.
-                if (mem_post_decode + mem_post_prompt < graph_free_mem
-                        and not decode_captured_all and prompt_captured_all):
+                if mem_post_decode + mem_post_prompt < graph_free_mem \
+                    and not decode_captured_all \
+                        and prompt_captured_all:
                     mem_post_decode, _, _ = self.warmup_graphs(
-                        decode_strategy,
-                        self.decode_buckets,
-                        False,
-                        kv_caches,
+                        decode_strategy, self.decode_buckets, False, kv_caches,
                         graph_free_mem - mem_post_prompt - mem_post_decode,
-                        mem_post_decode,
-                        decode_batch_seq,
-                    )
+                        mem_post_decode, decode_batch_seq)
 
                 self.log_graph_warmup_summary(self.prompt_buckets, True,
                                               mem_post_prompt)
@@ -1729,13 +1629,12 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
 
 def _maybe_wrap_in_hpu_graph(*args, **kwargs):
-    return (htorch.hpu.wrap_in_hpu_graph(HpuModelAdapter(*args, **kwargs),
-                                         disable_tensor_cache=True)
-            if htorch.utils.internal.is_lazy() else HpuModelAdapter(
-                *args, **kwargs))
+    return htorch.hpu.wrap_in_hpu_graph(
+        HpuModelAdapter(*args, **kwargs), disable_tensor_cache=True
+    ) if htorch.utils.internal.is_lazy() else HpuModelAdapter(*args, **kwargs)
 
 
-class HabanaProfilerCounterHelper:
+class HabanaProfilerCounterHelper():
 
     def __init__(self):
         self.niter = 0
@@ -1756,15 +1655,8 @@ class HabanaProfilerCounterHelper:
             for seq_data in seq_group_metadata.seq_data.values()
         ]
 
-    def get_counter_dict(
-        self,
-        cache_config,
-        duration,
-        seq_len,
-        batch_size_padded,
-        real_batch_size,
-        is_prompt,
-    ):
+    def get_counter_dict(self, cache_config, duration, seq_len,
+                         batch_size_padded, real_batch_size, is_prompt):
         throughput = batch_size_padded / (duration / 1e6)
         throughput_effective = real_batch_size / (duration / 1e6)
 
@@ -1780,15 +1672,15 @@ class HabanaProfilerCounterHelper:
                                    self.average_real_throughput)
         phase = "prompt" if is_prompt else "decode"
         counters = {
-            f"{phase}_bucket_batch_size": batch_size_padded,
-            f"{phase}_batch_size": real_batch_size,
-            f"{phase}_bucket_seq_len": seq_len,
-            f"{phase}_seq_len": real_max_seq_len,
-            f"{phase}_bucket_gen_throughput": throughput,
-            f"{phase}_real_gen_throughput": throughput_effective,
-            f"{phase}_batch_token_utilization": batch_token_utilization,
-            "average_real_throughput": self.average_real_throughput,
-            "engine_iteration": self.niter,
+            f'{phase}_bucket_batch_size': batch_size_padded,
+            f'{phase}_batch_size': real_batch_size,
+            f'{phase}_bucket_seq_len': seq_len,
+            f'{phase}_seq_len': real_max_seq_len,
+            f'{phase}_bucket_gen_throughput': throughput,
+            f'{phase}_real_gen_throughput': throughput_effective,
+            f'{phase}_batch_token_utilization': batch_token_utilization,
+            'average_real_throughput': self.average_real_throughput,
+            'engine_iteration': self.niter,
         }
         self.niter += 1
         if is_prompt:
@@ -1796,36 +1688,37 @@ class HabanaProfilerCounterHelper:
                 duration / 1e6)
             prompt_real_in_throughput = sum(
                 self.prompt_seq_lens) / (duration / 1e6)
-            counters[f"{phase}_bucket_in_throughput"] = (
-                prompt_bucket_in_throughput)
-            counters[f"{phase}_real_in_throughput"] = prompt_real_in_throughput
+            counters[
+                f'{phase}_bucket_in_throughput'] = prompt_bucket_in_throughput
+            counters[f'{phase}_real_in_throughput'] = prompt_real_in_throughput
 
         # KV cache might not be created yet (e.g. for profiling run)
-        if (cache_config.num_gpu_blocks is not None
-                and cache_config.num_gpu_blocks != 0):
+        if cache_config.num_gpu_blocks is not None and \
+            cache_config.num_gpu_blocks != 0:
             cache_num_blocks_used = [
                 math.ceil(sl / cache_config.block_size)
                 for sl in self.real_seq_lens
             ]
             cache_total_num_blocks_used = sum(cache_num_blocks_used)
             num_cache_blocks = cache_config.num_gpu_blocks
-            cache_total_num_free_blocks = (num_cache_blocks -
-                                           cache_total_num_blocks_used)
-            cache_computed_utilization = (cache_total_num_blocks_used /
-                                          num_cache_blocks)
+            cache_total_num_free_blocks = \
+                num_cache_blocks - cache_total_num_blocks_used
+            cache_computed_utilization = \
+                cache_total_num_blocks_used / num_cache_blocks
             max_blocks_per_seq = math.ceil(seq_len / cache_config.block_size)
             batch_block_utilization = cache_total_num_blocks_used / (
                 batch_size_padded * max_blocks_per_seq)
-            counters["cache_num_blocks_used"] = cache_total_num_blocks_used
-            counters["cache_num_free_blocks"] = cache_total_num_free_blocks
-            counters["cache_computed_utilization"] = cache_computed_utilization
-            counters[f"{phase}_batch_block_utilization"] = (
-                batch_block_utilization)
+            counters['cache_num_blocks_used'] = cache_total_num_blocks_used
+            counters['cache_num_free_blocks'] = cache_total_num_free_blocks
+            counters['cache_computed_utilization'] = cache_computed_utilization
+            counters[
+                f'{phase}_batch_block_utilization'] = batch_block_utilization
         if not self.logged_once:
-            counters["const_cache_num_blocks"] = cache_config.num_gpu_blocks
-            counters["const_gpu_memory_utilization"] = (
-                cache_config.gpu_memory_utilization)
-            counters["const_block_size"] = cache_config.block_size
+            counters['const_cache_num_blocks'] = cache_config.num_gpu_blocks
+            counters[
+                'const_gpu_memory_utilization'] = \
+                    cache_config.gpu_memory_utilization
+            counters['const_block_size'] = cache_config.block_size
             self.logged_once = True
         return counters
 
@@ -1834,8 +1727,8 @@ def unwrap_model(model):
     if isinstance(model, torch._dynamo.eval_frame.OptimizedModule):
         return unwrap_model(model._orig_mod)
     else:
-        model = list(vars(model)["_modules"].values())[0]
-        modules = list(vars(model)["_modules"].values())
+        model = list(vars(model)['_modules'].values())[0]
+        modules = list(vars(model)['_modules'].values())
         return modules
 
 
@@ -1844,7 +1737,6 @@ class HabanaModelRunner(
     """
     GPU model runner with sampling step.
     """
-
     _model_input_cls: Type[ModelInputForHPUWithSamplingMetadata] = (
         ModelInputForHPUWithSamplingMetadata)
 
@@ -1862,7 +1754,7 @@ class HabanaModelRunner(
         self,
         seq_group_metadata_list: List[SequenceGroupMetadata],
         virtual_engine: int = 0,
-        finished_requests_ids: Optional[List[str]] = None,
+        finished_requests_ids: Optional[List[str]] = None
     ) -> ModelInputForHPUWithSamplingMetadata:
         """Prepare the model input based on a given sequence group, including
         metadata for the sampling step.
@@ -1873,7 +1765,7 @@ class HabanaModelRunner(
         - input_tokens[num_prefill_tokens:] contains decode tokens.
         If cuda graph is required, this API automatically pads inputs.
         """
-        with self.profiler.record_event("internal", "prepare_input_tensors"):
+        with self.profiler.record_event('internal', 'prepare_input_tensors'):
             assert seq_group_metadata_list is not None
             self.profiler_counter_helper.capture_seq_group_metadata_stats(
                 seq_group_metadata_list=seq_group_metadata_list)
@@ -1882,16 +1774,13 @@ class HabanaModelRunner(
             assert model_input.attn_metadata is not None
             is_prompt = model_input.attn_metadata.is_prompt
 
-        return dataclasses.replace(
-            model_input,
-            sampling_metadata=sampling_metadata,
-            is_prompt=is_prompt,
-            virtual_engine=virtual_engine,
-        )
+        return dataclasses.replace(model_input,
+                                   sampling_metadata=sampling_metadata,
+                                   is_prompt=is_prompt,
+                                   virtual_engine=virtual_engine)
 
     def finish_measurements(self):
         from neural_compressor.torch.quantization import finalize_calibration
-
         finalize_calibration(self.model.model)
 
     def _check_config(self, batch_size, seq_len, is_prompt, warmup_mode):
@@ -1899,13 +1788,9 @@ class HabanaModelRunner(
         seen = cfg in self.seen_configs
         self.seen_configs.add(cfg)
         if not seen and not warmup_mode:
-            phase = "prompt" if is_prompt else "decode"
-            logger.warning(
-                "Configuration: (%s, %s, %s) was not warmed-up!",
-                phase,
-                batch_size,
-                seq_len,
-            )
+            phase = 'prompt' if is_prompt else 'decode'
+            logger.warning("Configuration: (%s, %s, %s) was not warmed-up!",
+                           phase, batch_size, seq_len)
 
     @torch.inference_mode()
     def execute_model(
@@ -1948,7 +1833,7 @@ class HabanaModelRunner(
             "kv_caches": kv_caches,
             "attn_metadata": self.trim_attn_metadata(attn_metadata),
             "intermediate_tensors": intermediate_tensors,
-            "lora_mask": model_input.lora_mask,
+            "lora_mask": model_input.lora_mask
         }
         if multi_modal_input is not None:
             execute_model_kwargs.update(multi_modal_input)
@@ -1963,23 +1848,22 @@ class HabanaModelRunner(
                                 f"seq{seq_len}_"
                                 f"graphs{'T' if use_graphs else 'F'}")
         else:
-            model_event_name = "model_executable"
-        with self.profiler.record_event("internal", model_event_name):
+            model_event_name = 'model_executable'
+        with self.profiler.record_event('internal', model_event_name):
             hidden_states = self.model.forward(
                 **execute_model_kwargs,
-                selected_token_indices=sampling_metadata.
-                selected_token_indices,
+                selected_token_indices=sampling_metadata.selected_token_indices
             )
 
         if self.lora_config:
             from vllm.lora.layers import VocabParallelEmbeddingWithLoRA
-
             modules = unwrap_model(self.model.model)
             for module in modules:
                 if isinstance(module, VocabParallelEmbeddingWithLoRA):
                     for i in range(0, len(module.indices_len)):
-                        module.indices_len[i] = (
-                            sampling_metadata.selected_token_indices.numel())
+                        module.indices_len[
+                            i] = sampling_metadata.selected_token_indices.numel(
+                            )
             lora_logits_mask: torch.Tensor = model_input.lora_logits_mask
             LoraMask.setLoraMask(
                 lora_logits_mask.index_select(
@@ -1987,12 +1871,10 @@ class HabanaModelRunner(
 
         # Compute the logits.
         with self.profiler.record_event(
-                "internal",
-            ('compute_logits_'
-             f'{"prompt" if is_prompt else "decode"}_bs'
-             f'{batch_size}_'
-             f'seq{seq_len}'),
-        ):
+                'internal', ('compute_logits_'
+                             f'{"prompt" if is_prompt else "decode"}_bs'
+                             f'{batch_size}_'
+                             f'seq{seq_len}')):
             sampling_metadata.selected_token_indices = None
             logits = self.model.compute_logits(hidden_states,
                                                sampling_metadata)
@@ -2003,12 +1885,10 @@ class HabanaModelRunner(
 
         # Sample the next token.
         with self.profiler.record_event(
-                "internal",
-            ('sample_'
-             f'{"prompt" if is_prompt else "decode"}_'
-             f'bs{batch_size}_'
-             f'seq{seq_len}'),
-        ):
+                'internal', ('sample_'
+                             f'{"prompt" if is_prompt else "decode"}_'
+                             f'bs{batch_size}_'
+                             f'seq{seq_len}')):
             output = self.model.sample(
                 logits=logits,
                 sampling_metadata=sampling_metadata,
@@ -2026,21 +1906,19 @@ class HabanaModelRunner(
                 seq_len=seq_len,
                 batch_size_padded=batch_size_padded,
                 real_batch_size=real_batch_size,
-                is_prompt=is_prompt,
-            )
+                is_prompt=is_prompt)
             self.profiler.record_counter(self.event_start, counters)
         return [output]
 
     def shutdown_inc(self):
-        print("inc shutdown")
-        if (model_config := getattr(self, "model_config", None)) and getattr(
-                model_config, "quantization", None) == "inc":
-            print("inc shutdown start")
+        print('inc shutdown')
+        if (model_config := getattr(self, "model_config", None)) and \
+                         getattr(model_config, "quantization", None) == 'inc':
+            print('inc shutdown start')
             from neural_compressor.torch.quantization import (
                 finalize_calibration)
-
             finalize_calibration(self.model.model)
-            print("inc shutdown")
+            print('inc shutdown')
 
     def __del__(self):
         self.shutdown_inc()
