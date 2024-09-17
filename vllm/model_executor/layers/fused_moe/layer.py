@@ -103,17 +103,25 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                          num_expert_group=num_expert_group,
                          topk_group=topk_group)
 
-    def forward_hpu(self, x: torch.Tensor, w1: torch.Tensor, w2: torch.Tensor,
-                    router_logits: torch.Tensor, top_k: int, renormalize: bool,
-                    use_grouped_topk: bool, num_expert_group: Optional[int],
-                    topk_group: Optional[int],
-                    layer: Optional[torch.nn.Module]):
+    def forward_hpu(
+        self,
+        x: torch.Tensor,
+        w1: torch.Tensor,
+        w2: torch.Tensor,
+        router_logits: torch.Tensor,
+        top_k: int,
+        renormalize: bool,
+        use_grouped_topk: bool,
+        num_expert_group: Optional[int],
+        topk_group: Optional[int],
+        layer: Optional[torch.nn.Module],
+    ):
         assert not use_grouped_topk, 'use_grouped_topk must be False on HPU'
         assert num_expert_group is None, ('num_expert_group is '
                                           'not supported on HPU')
         assert topk_group is None, 'topk_group is not supported on HPU'
-        assert layer is not None, 'layer has to be provided on HP'
-        return layer.hpu_static_fused_moe(x, w1, w2, router_logits, top_k)
+        if layer is not None:
+            return layer.hpu_static_fused_moe(x, w1, w2, router_logits, top_k)
 
     def forward_cpu(self, *args, **kwargs):
         raise NotImplementedError(
@@ -142,7 +150,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
 class FusedMoE(torch.nn.Module):
     """FusedMoE layer for MoE models.
 
-    This layer contains both MergedColumnParallel weights (gate_up_proj / 
+    This layer contains both MergedColumnParallel weights (gate_up_proj /
     w13) and RowParallelLinear weights (down_proj/ w2).
 
     Note: Mixtral uses w1, w2, and w3 for gate, up, and down_proj. We
