@@ -525,8 +525,7 @@ class QKVParallelLinear(ColumnParallelLinear):
                  skip_bias_add: bool = False,
                  params_dtype: Optional[torch.dtype] = None,
                  quant_config: Optional[QuantizationConfig] = None,
-                 prefix: str = "",
-                 split_qk_v: bool = False):
+                 prefix: str = ""):
         self.hidden_size = hidden_size
         self.head_size = head_size
         self.total_num_heads = total_num_heads
@@ -543,21 +542,14 @@ class QKVParallelLinear(ColumnParallelLinear):
         else:
             self.num_kv_heads = divide(self.total_num_kv_heads, tp_size)
             self.num_kv_head_replicas = 1
-        self.split_qk_v = split_qk_v
-        self.q_size = self.num_heads * self.head_size * tp_size
-        self.kv_size = self.num_kv_heads * self.head_size * tp_size
         input_size = self.hidden_size
+        output_size = (self.num_heads +
+                       2 * self.num_kv_heads) * tp_size * self.head_size
         self.output_sizes = [
-            self.q_size,  # q_proj
-            self.kv_size,  # k_proj
+            self.num_heads * self.head_size * tp_size,  # q_proj
+            self.num_kv_heads * self.head_size * tp_size,  # k_proj
+            self.num_kv_heads * self.head_size * tp_size,  # v_proj 
         ]
-        if split_qk_v:
-            output_size = (self.num_heads +
-                           self.num_kv_heads) * tp_size * self.head_size
-        else:
-            output_size = (self.num_heads +
-                           2 * self.num_kv_heads) * tp_size * self.head_size
-            self.output_sizes.append(self.kv_size)  # v_proj
 
         super().__init__(input_size=input_size,
                          output_size=output_size,
@@ -567,16 +559,6 @@ class QKVParallelLinear(ColumnParallelLinear):
                          params_dtype=params_dtype,
                          quant_config=quant_config,
                          prefix=prefix)
-
-        if split_qk_v:
-            self.v_proj = ColumnParallelLinear(input_size=input_size,
-                                               output_size=self.kv_size,
-                                               bias=bias,
-                                               gather_output=False,
-                                               skip_bias_add=skip_bias_add,
-                                               params_dtype=params_dtype,
-                                               quant_config=quant_config,
-                                               prefix=prefix)
 
     def weight_loader(self,
                       param: Parameter,
@@ -659,19 +641,13 @@ class QKVParallelLinear(ColumnParallelLinear):
                     "q": (0, self.num_heads * self.head_size),
                     "k": (self.num_heads * self.head_size,
                           self.num_kv_heads * self.head_size),
+                    "v":
+                    ((self.num_heads + self.num_kv_heads) * self.head_size,
+                     self.num_kv_heads * self.head_size),
+                    "total":
+                    ((self.num_heads + 2 * self.num_kv_heads) * self.head_size,
+                     0)
                 }
-                if self.split_qk_v:
-                    orig_qkv_offsets["total"] = (
-                        (self.num_heads + self.num_kv_heads) * self.head_size,
-                        0)
-                else:
-                    orig_qkv_offsets["v"] = (
-                        (self.num_heads + self.num_kv_heads) * self.head_size,
-                        self.num_kv_heads * self.head_size)
-                    orig_qkv_offsets["total"] = (
-                        (self.num_heads + 2 * self.num_kv_heads) *
-                        self.head_size, 0)
-
                 shard_size, shard_offset = adjust_bitsandbytes_shard(
                     param, orig_qkv_offsets, loaded_shard_id)
 
@@ -705,13 +681,6 @@ class QKVParallelLinear(ColumnParallelLinear):
 
         assert param_data.shape == loaded_weight.shape
         param_data.copy_(loaded_weight)
-
-    def forward(self, input_):
-        output, output_bias = super().forward(input_)
-        if not self.split_qk_v:
-            return output, output_bias
-        v, _ = self.v_proj(input_)
-        return output, v, output_bias
 
 
 class RowParallelLinear(LinearBase):

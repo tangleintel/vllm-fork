@@ -134,7 +134,6 @@ class LlamaAttention(nn.Module):
         self.scaling = self.head_dim**-0.5
         self.rope_theta = rope_theta
         self.max_position_embeddings = max_position_embeddings
-        self.split_qk_v = cache_config.split_qk_v
 
         self.qkv_proj = QKVParallelLinear(
             hidden_size=hidden_size,
@@ -144,7 +143,6 @@ class LlamaAttention(nn.Module):
             bias=bias,
             quant_config=quant_config,
             prefix=f"{prefix}.qkv_proj",
-            split_qk_v=self.split_qk_v,
         )
         self.o_proj = RowParallelLinear(
             input_size=self.total_num_heads * self.head_dim,
@@ -175,13 +173,8 @@ class LlamaAttention(nn.Module):
         kv_cache: torch.Tensor,
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
-        if self.split_qk_v:
-            qk, v, _ = self.qkv_proj(hidden_states)
-            q, k = qk.split([self.q_size, self.kv_size], dim=-1)
-        else:
-            qkv, _ = self.qkv_proj(hidden_states)
-            q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size],
-                                dim=-1)
+        qkv, _ = self.qkv_proj(hidden_states)
+        q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
         q, k = self.rotary_emb(positions, q, k)
         attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
         output, _ = self.o_proj(attn_output)
@@ -396,7 +389,6 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA):
 
         self.config = config
         self.lora_config = lora_config
-        self.split_qk_v = cache_config.split_qk_v
 
         self.model = LlamaModel(config,
                                 cache_config,
@@ -475,13 +467,10 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA):
             # (param_name, shard_name, shard_id)
             (".qkv_proj", ".q_proj", "q"),
             (".qkv_proj", ".k_proj", "k"),
+            (".qkv_proj", ".v_proj", "v"),
             (".gate_up_proj", ".gate_proj", 0),
             (".gate_up_proj", ".up_proj", 1),
         ]
-        if self.split_qk_v:
-            stacked_params_mapping.append((".qkv_proj.v_proj", ".v_proj", "v"))
-        else:
-            stacked_params_mapping.append((".qkv_proj", ".v_proj", "v"))
         params_dict = dict(self.named_parameters())
         for name, loaded_weight in weights:
             if "rotary_emb.inv_freq" in name:
@@ -512,10 +501,7 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA):
 
                 param = params_dict[name]
                 weight_loader = param.weight_loader
-                if self.split_qk_v and shard_id == "v":
-                    weight_loader(param, loaded_weight)
-                else:
-                    weight_loader(param, loaded_weight, shard_id)
+                weight_loader(param, loaded_weight, shard_id)
 
                 break
             else:
