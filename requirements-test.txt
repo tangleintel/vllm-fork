@@ -23,3 +23,6 @@ aiohttp
 
 # quantization
 bitsandbytes==0.42.0
+
+# HPU lm_eval tests
+lm_eval
