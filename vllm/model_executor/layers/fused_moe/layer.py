@@ -13,10 +13,16 @@ from vllm.model_executor.layers.quantization.base_config import (
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.utils import is_hpu
 
-if is_hpu():
-    from vllm.hpu.ops import static_fused_moe
-
 logger = init_logger(__name__)
+import os
+if is_hpu():
+    dynamic_fused = os.getenv('DYNAMIC_FUSED_MOE', "true")
+    if dynamic_fused == "true":
+        logger.info("dynamic_fused_moe is getting used")
+        from vllm.hpu.ops import dynamic_fused_moe as static_fused_moe
+    else:
+        logger.info("static_fused_moe is getting used")
+        from vllm.hpu.ops import static_fused_moe
 
 
 class FusedMoEMethodBase(QuantizeMethodBase):
@@ -140,7 +146,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
 class FusedMoE(torch.nn.Module):
     """FusedMoE layer for MoE models.
 
-    This layer contains both MergedColumnParallel weights (gate_up_proj / 
+    This layer contains both MergedColumnParallel weights (gate_up_proj /
     w13) and RowParallelLinear weights (down_proj/ w2).
 
     Note: Mixtral uses w1, w2, and w3 for gate, up, and down_proj. We
