@@ -24,7 +24,7 @@ from vllm.model_executor.utils import set_weight_attrs
 from vllm.platforms import current_platform
 from vllm.utils import print_warning_once
 if current_platform.is_hpu():
-    from vllm.hpu.ops import scaled_fp8_quant
+    from vllm_hpu_extension.ops import scaled_fp8_quant
     ops.scaled_fp8_quant = scaled_fp8_quant
 
 ACTIVATION_SCHEMES = ["static", "dynamic"]
@@ -118,8 +118,8 @@ class Fp8LinearMethod(LinearMethodBase):
         if torch.cuda.is_available():
             self.cutlass_fp8_supported = cutlass_fp8_supported()
 
-            # For GPUs that lack FP8 hardware support, we can leverage the Marlin
-            # kernel for fast weight-only FP8 quantization
+            # For GPUs that lack FP8 hardware support, we can leverage the
+            # Marlin kernel for fast weight-only FP8 quantization
             capability = current_platform.get_device_capability()
             capability = capability[0] * 10 + capability[1]
             self.use_marlin = capability < 89

@@ -54,7 +54,7 @@ from vllm.utils import is_hip
 
 from .interfaces import SupportsLoRA
 from .utils import PPMissingLayer, is_pp_missing_parameter, make_layers
-from vllm.platforms import current_platform
+
 if current_platform.is_hpu():
     import habana_frameworks.torch.core as htcore
 
@@ -321,7 +321,7 @@ class LlamaModel(nn.Module):
             hidden_states = intermediate_tensors["hidden_states"]
             residual = intermediate_tensors["residual"]
 
-        if is_hpu:
+        if current_platform.is_hpu():
             import habana_frameworks.torch as htorch
             htorch.core.mark_step()
         for i in range(self.start_layer, self.end_layer):
@@ -333,7 +333,7 @@ class LlamaModel(nn.Module):
                 attn_metadata,
                 residual,
             )
-            if is_hpu:
+            if current_platform.is_hpu():
                 htorch.core.mark_step()
 
         if not get_pp_group().is_last_rank:

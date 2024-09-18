@@ -8,7 +8,7 @@ from vllm.model_executor.utils import set_weight_attrs
 from vllm.platforms import current_platform
 if current_platform.is_hpu():
     import habana_frameworks.torch.utils.experimental as htexp
-    from vllm.hpu.ops import scaled_fp8_quant
+    from vllm_hpu_extension.ops import scaled_fp8_quant
     ops.scaled_fp8_quant = scaled_fp8_quant
 
 

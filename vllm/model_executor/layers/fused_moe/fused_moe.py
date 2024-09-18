@@ -14,7 +14,7 @@ from vllm.logger import init_logger
 from vllm.platforms import current_platform
 
 if current_platform.is_hpu():
-    from vllm.hpu.ops import scaled_fp8_quant
+    from vllm_hpu_extension.ops import scaled_fp8_quant
     ops.scaled_fp8_quant = scaled_fp8_quant
 
 logger = init_logger(__name__)
