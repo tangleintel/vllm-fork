@@ -230,8 +230,9 @@ def hpu_backend_string():
 
 @lru_cache(maxsize=None)
 def _is_habana_frameworks_installed() -> bool:
-    from importlib import util
-    return util.find_spec('habana_frameworks') is not None
+    if hasattr(torch, "hpu"):
+        return torch.hpu.is_available()
+    return False
 
 
 @lru_cache(maxsize=None)
