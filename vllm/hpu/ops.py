@@ -292,6 +292,7 @@ class StaticFusedMOE(torch.nn.Module):
 
         return final_hidden_states.view(-1, D)
 
+
 # fp8
 def scaled_fp8_quant(
     input: torch.Tensor,
@@ -300,7 +301,6 @@ def scaled_fp8_quant(
     scale_ub: Optional[torch.Tensor] = None,
     use_per_token_if_dynamic: bool = False,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-
     """
     Quantize input tensor to FP8 and return quantized tensor and scale.
     This function supports both static and dynamic quantization: If you
@@ -341,6 +341,10 @@ def scaled_fp8_quant(
             scale = torch.zeros(1, device=input.device, dtype=torch.float32)
             torch.ops._C.dynamic_scaled_fp8_quant(output, input, scale)
     else:
-        output = torch.ops.hpu.cast_to_fp8_v2(input, 1/scale, False, False, dtype=torch.float8_e4m3fn)[0]
+        output = torch.ops.hpu.cast_to_fp8_v2(input,
+                                              1 / scale,
+                                              False,
+                                              False,
+                                              dtype=torch.float8_e4m3fn)[0]
 
     return output, scale
