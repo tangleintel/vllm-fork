@@ -168,25 +168,25 @@ export OPENAI_API_BASE="http://localhost:8084/v1"
 export EXPERIMENTAL_WEIGHT_SHARING=0
 export VLLM_ENGINE_ITERATION_TIMEOUT_S=600
 export VLLM_PROFILER_ENABLED=true
-if [ -n "$input_len" ]; then
-    export VLLM_PROMPT_SEQ_BUCKET_MAX=$input_len
-    export VLLM_PROMPT_SEQ_BUCKET_MIN=$input_len
-    export VLLM_DECODE_BLOCK_BUCKET_MAX=3200 #BS*seq_lne/bucket_step
-fi
 
 export VLLM_GRAPH_RESERVED_MEM=0.3
 export VLLM_PROMPT_BS_BUCKET_MIN=1
 export VLLM_PROMPT_BS_BUCKET_STEP=1
 export VLLM_PROMPT_BS_BUCKET_MAX=1
 
-export VLLM_PROMPT_SEQ_BUCKET_STEP=$input_len #2176
-
-export VLLM_DECODE_BS_BUCKET_MIN=$batch_size
-export VLLM_DECODE_BS_BUCKET_STEP=$batch_size
+export VLLM_DECODE_BS_BUCKET_MIN=1
+export VLLM_DECODE_BS_BUCKET_STEP=64
 export VLLM_DECODE_BS_BUCKET_MAX=$batch_size
 
 export VLLM_DECODE_BLOCK_BUCKET_MIN=128 #272
 export VLLM_DECODE_BLOCK_BUCKET_STEP=128 #272
+
+if [ -n "$input_len" ]; then
+    export VLLM_PROMPT_SEQ_BUCKET_MIN=$input_len
+    export VLLM_PROMPT_SEQ_BUCKET_STEP=$input_len
+    export VLLM_PROMPT_SEQ_BUCKET_MAX=$input_len
+    export VLLM_DECODE_BLOCK_BUCKET_MAX=$(($batch_size*$input_len/$VLLM_DECODE_BLOCK_BUCKET_MIN)) #BS*input_len/bucket_step
+fi
 
 
 AVAILABLE_HPU=`ls /dev/accel/accel[0-9] | wc -l`
@@ -198,14 +198,6 @@ for ((i=0; i<${IDLE_HPU}; i++)); do
         python ./keep_alive.py ${LOCK_FILE} > /dev/null 2>/dev/null &
 done
 
-if [[ $load_balancer == "Off" ]] && [[ $hpu_num -gt 1 ]]; then
-        # FIXME: Delayed sampling is causing issues on TP>1
-        SAMPLING_FLAGS=""
-        # FIXME: Disabling tensor_cache is causing issues on TP>1
-        export PT_HPUGRAPH_DISABLE_TENSOR_CACHE=0
-else
-        SAMPLING_FLAGS="--num-lookahead-slots 1 --use-v2-block-manager"
-fi
 
 python -m vllm.entrypoints.openai.api_server --port 8084 \
         --model $model \
