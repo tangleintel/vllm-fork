@@ -1874,8 +1874,10 @@ class HabanaModelRunner(
             if model_input.seq_group_metadata_list is not None:
                 for seq_group_metadata in model_input.seq_group_metadata_list:
                     assert len(seq_group_metadata.seq_data) == 1
+                    prev_logits_device = "hpu"
                     for seq_data in seq_group_metadata.seq_data.values():
                         if seq_data.prev_logits is not None:
+                            prev_logits_device = seq_data.prev_logits.device
                             if logits_tensor is None:
                                 logits_tensor = seq_data.prev_logits
                             if seq_data.prev_logits is logits_tensor:
@@ -1899,7 +1901,7 @@ class HabanaModelRunner(
                                             device="hpu"))
             if logits_tensor is not None:
                 logits_tensor_list.append(logits_tensor[torch.tensor(
-                    logits_ids_list, device=seq_data.prev_logits.device)])
+                    logits_ids_list, device=prev_logits_device)])
 
             prev_logits = torch.cat(logits_tensor_list, dim=0)
 
