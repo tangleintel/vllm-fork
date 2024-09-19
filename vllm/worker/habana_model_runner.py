@@ -1894,7 +1894,7 @@ class HabanaModelRunner(
                         else:
                             # warmup only, TODO add a check
                             logits_tensor_list.append(
-                                torch.zeros([1, 32000],
+                                torch.zeros([1, 128256],
                                             dtype=torch.float,
                                             device="hpu"))
             if logits_tensor is not None:
