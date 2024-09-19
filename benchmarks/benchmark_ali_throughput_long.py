@@ -106,9 +106,9 @@ def run_vllm(
         max_num_batched_tokens=max_num_batched_tokens,
         block_size=128,
         max_num_seqs=128,
-	#num_lookahead_slots=1,
-	#use_v2_block_manager=True,
-        #enable_delayed_sampling=True,
+	    num_lookahead_slots=1,
+	    use_v2_block_manager=True,
+        enable_delayed_sampling=True,
     )
 
     # Add the requests to the engine.

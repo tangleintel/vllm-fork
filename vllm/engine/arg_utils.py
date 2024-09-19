@@ -313,11 +313,12 @@ class EngineArgs:
                             'capping to sliding window size')
         parser.add_argument('--use-v2-block-manager',
                             action='store_true',
+                            default=True
                             help='Use BlockSpaceMangerV2.')
         parser.add_argument(
             '--num-lookahead-slots',
             type=int,
-            default=EngineArgs.num_lookahead_slots,
+            default=1,
             help='Experimental scheduling config necessary for '
             'speculative decoding. This will be replaced by '
             'speculative config in the future; it is present '
@@ -531,6 +532,7 @@ class EngineArgs:
         parser.add_argument(
             '--enable-delayed-sampling',
             action='store_true',
+            default=True,
             help='If set, the sampling will be delayed by 1 step. First '
             'model request execution (prefill) will return an invalid token '
             'id that will be discarded. Actual sampling of valid token ids '
