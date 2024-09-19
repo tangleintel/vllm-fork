@@ -313,7 +313,7 @@ class EngineArgs:
                             'capping to sliding window size')
         parser.add_argument('--use-v2-block-manager',
                             action='store_true',
-                            default=True
+                            default=True,
                             help='Use BlockSpaceMangerV2.')
         parser.add_argument(
             '--num-lookahead-slots',
