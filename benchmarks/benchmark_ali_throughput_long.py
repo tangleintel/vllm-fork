@@ -94,7 +94,7 @@ def run_vllm(
         seed=seed,
         trust_remote_code=trust_remote_code,
         dtype=dtype,
-        max_model_len=20000,
+        max_model_len=32768,
         gpu_memory_utilization=gpu_memory_utilization,
         enforce_eager=enforce_eager,
         kv_cache_dtype=kv_cache_dtype,
