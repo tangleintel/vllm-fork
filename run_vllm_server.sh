@@ -24,6 +24,8 @@ usage() {
     exit 1
 }
 
+VLLM_REPO_DIR=$(dirname "$(readlink -f "$0")")
+chat_template_file="$VLLM_REPO_DIR/mistral_mixtral.jinja"
 
 wait_for_server() {
     local port="$1"
@@ -211,6 +213,7 @@ python -m vllm.entrypoints.openai.api_server --port 8084 \
         --enable-delayed-sampling \
         --num-lookahead-slots 1 \
         --use-v2-block-manager \
+        --chat-template=$chat_template_file \
         $EAGER_FLAG \
         $SAMPLING_FLAGS \
         $QUANT_FLAGS >> ${output_dir}/vllm_server.log 2>&1 &
