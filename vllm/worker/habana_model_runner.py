@@ -659,8 +659,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             max_bucket_cfg = self.max_num_batched_tokens // self.block_size
         blocks_step = 128
         #FIXME: The default values should be max_model_len
-        max_prompt_seq = 1024
-        max_decode_seq = 2048
+        max_prompt_seq = 32768
+        max_decode_seq = 32768
         self.prompt_bs_bucket_cfg = read_bucket_settings(
             'prompt',
             'bs',
