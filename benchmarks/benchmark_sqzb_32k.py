@@ -99,6 +99,7 @@ def read_or_create_prompts(
             prompt_tok_ids = sample_requests(df, n, tokenizer)
         else:
             assert "tok_inputs" in df.columns
+            prompt_tok_ids = []
             prompt_tok_ids_tmp = df["tok_inputs"][:n].apply(np.ndarray.tolist).to_list()
             dataset_coefficient = max_input_len // 8192
             for p in prompt_tok_ids_tmp:
