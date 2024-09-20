@@ -6,7 +6,6 @@
 set -ex
 
 # Kill vLLM if present
-pkill -f 'keep_alive.py' && sleep 15
 pkill -f 'python -m vllm.entrypoints.openai.api_server' && sleep 15
 
 usage() {
@@ -24,8 +23,6 @@ usage() {
     exit 1
 }
 
-VLLM_REPO_DIR=$(dirname "$(readlink -f "$0")")
-chat_template_file="$VLLM_REPO_DIR/mistral_mixtral.jinja"
 
 wait_for_server() {
     local port="$1"
@@ -49,8 +46,8 @@ wait_for_server() {
     return -1
 }
 
-model="llama2-70b"
-hpu_num=8
+model="mixtral-8x7b"
+hpu_num=1
 eager_mode="Off"
 load_balancer="Off"
 fp8="Off"
@@ -88,6 +85,10 @@ while [[ $# -gt 0 ]]; do
         --input_len)
             input_len=$2
             shift 2
+            ;;
+        --profile)
+            export VLLM_PROFILER_ENABLED=true
+            shift 1
             ;;
         --help)
             usage
@@ -159,17 +160,16 @@ fi
 
 
 script_dir=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
-output_dir=${RESULT_DIR:-$output_dir}
 output_dir=${output_dir:-$script_dir/results}
 if [ ! -d "$output_dir" ]; then
     mkdir -p "$output_dir"
 fi
+chat_template_file="$script_dir/mistral_mixtral.jinja"
 
 export OPENAI_API_KEY=secret_abcdefg
 export OPENAI_API_BASE="http://localhost:8084/v1"
 export EXPERIMENTAL_WEIGHT_SHARING=0
 export VLLM_ENGINE_ITERATION_TIMEOUT_S=600
-export VLLM_PROFILER_ENABLED=true
 
 export VLLM_GRAPH_RESERVED_MEM=0.3
 export VLLM_PROMPT_BS_BUCKET_MIN=1
@@ -187,7 +187,8 @@ if [ -n "$input_len" ]; then
     export VLLM_PROMPT_SEQ_BUCKET_MIN=$input_len
     export VLLM_PROMPT_SEQ_BUCKET_STEP=$input_len
     export VLLM_PROMPT_SEQ_BUCKET_MAX=$input_len
-    export VLLM_DECODE_BLOCK_BUCKET_MAX=$(($batch_size*$input_len/$VLLM_DECODE_BLOCK_BUCKET_MIN)) #BS*input_len/bucket_step
+    #export VLLM_DECODE_BLOCK_BUCKET_MAX=$(($batch_size*$input_len/$VLLM_DECODE_BLOCK_BUCKET_MIN)) #BS*input_len/bucket_step
+    #VLLM_DECODE_BLOCK_BUCKET_MAX  leaving as default as suggested by R&d
 fi
 
 
