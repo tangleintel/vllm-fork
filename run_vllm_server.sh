@@ -214,11 +214,11 @@ python -m vllm.entrypoints.openai.api_server --port 8084 \
         --enable-delayed-sampling \
         --num-lookahead-slots 1 \
         --use-v2-block-manager \
-        --chat-template=$chat_template_file \
         $EAGER_FLAG \
         $SAMPLING_FLAGS \
         $QUANT_FLAGS >> ${output_dir}/vllm_server.log 2>&1 &
 
+#        --chat-template=$chat_template_file \
 #--chat-template=/root/schoi/pytorch-training-tests/tests/gdn_tests/CB_tests/continous_batching_inference/benchmark/data/template/mistral_mixtral.jinja \
 #--swap-space 16 \
 
