@@ -5,13 +5,15 @@ from typing import List, Optional, Tuple, Type
 import torch
 
 from vllm.logger import init_logger
+from vllm.platforms import current_platform
 
 logger = init_logger(__name__)
 
-try:
-    import vllm._C
-except ImportError as e:
-    logger.warning("Failed to import from vllm._C with %r", e)
+if not current_platform.is_tpu() and not current_platform.is_hpu():
+    try:
+        import vllm._C
+    except ImportError as e:
+        logger.warning("Failed to import from vllm._C with %r", e)
 
 with contextlib.suppress(ImportError):
     import vllm._moe_C
