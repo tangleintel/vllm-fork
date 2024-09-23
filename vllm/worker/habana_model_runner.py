@@ -1566,7 +1566,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 graph_free_mem = align_workers(graph_free_mem,
                                                torch.distributed.ReduceOp.MIN)
                 prompt_graph_mem_ratio = float(
-                    os.environ.get('VLLM_GRAPH_PROMPT_RATIO', '0.5'))
+                    os.environ.get('VLLM_GRAPH_PROMPT_RATIO', '0.3'))
                 prompt_available_memory = (prompt_graph_mem_ratio *
                                            graph_free_mem)
                 decode_available_memory = (graph_free_mem -
