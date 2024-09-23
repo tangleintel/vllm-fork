@@ -658,7 +658,6 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if self.lora_config and \
             max_bucket_cfg > self.max_num_batched_tokens // self.block_size:
             max_bucket_cfg = self.max_num_batched_tokens // self.block_size
-        blocks_step = 128
         #FIXME: The default values should be max_model_len
         max_prompt_seq = 1024
         max_decode_seq = 2048
@@ -670,7 +669,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             max=align_bs(max_bucket_cfg))
         self.decode_bs_bucket_cfg = read_bucket_settings('decode',
                                                          'bs',
-                                                         min=align_bs(32),
+                                                         min=1,
                                                          step=align_bs(32),
                                                          max=self.max_num_seqs)
         self.prompt_seq_bucket_cfg = read_bucket_settings('prompt',
@@ -681,9 +680,9 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.decode_block_bucket_cfg = read_bucket_settings(
             'decode',
             'block',
-            min=blocks_step,
-            step=blocks_step,
-            max=max(blocks_step,
+            min=self.block_size,
+            step=self.block_size,
+            max=max(self.block_size,
                     self.max_num_seqs * max_decode_seq // self.block_size))
         self.graphed_buckets: Set[Any] = set()
 

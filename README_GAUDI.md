@@ -472,15 +472,15 @@ Environment variables
                     `max_model_len`
 
         - Decode:
-            - batch size min (`VLLM_DECODE_BS_BUCKET_MIN`): `min(max_num_seqs, 32)`
+            - batch size min (`VLLM_DECODE_BS_BUCKET_MIN`): `1`
             -   batch size step (`VLLM_DECODE_BS_BUCKET_STEP`):
                     `min(max_num_seqs, 32)`
             -   batch size max (`VLLM_DECODE_BS_BUCKET_MAX`):
                     `max_num_seqs`
             -   block size min (`VLLM_DECODE_BLOCK_BUCKET_MIN`):
-                    `128`
+                    `block_size`
             -   block size step
-                    (`VLLM_DECODE_BLOCK_BUCKET_STEP`): `128`
+                    (`VLLM_DECODE_BLOCK_BUCKET_STEP`): `block_size`
             -   block size max (`VLLM_DECODE_BLOCK_BUCKET_MAX`):
                     `max(128, (max_num_seqs*max_model_len)/block_size)`
 
