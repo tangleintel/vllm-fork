@@ -271,3 +271,41 @@ class StaticFusedMOE(torch.nn.Module):
             final_hidden_states += current_hidden_states_static
 
         return final_hidden_states.view(-1, D)
+
+
+class DynamicFusedMOE(torch.nn.Module):
+
+    def __init__(self, num_total_experts):
+        super().__init__()
+        self.w13_list = torch.nn.ModuleList(
+            [MoeMatmul() for _ in range(num_total_experts)])
+        self.w2_list = torch.nn.ModuleList(
+            [MoeMatmul() for _ in range(num_total_experts)])
+        self.num_total_experts = num_total_experts
+
+    def forward(self, hidden_states, w1, w2, score, topk):
+        htorch.core.mark_step()
+        B, D = hidden_states.shape
+        num_experts = w1.shape[0]
+        routing_weights = F.softmax(score, dim=1, dtype=torch.float32)
+        routing_weights, selected_experts = torch.topk(routing_weights,
+                                                       topk,
+                                                       dim=-1)
+        routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
+        routing_weights = routing_weights.to(hidden_states.dtype)
+        # pre-processing for custom op inputs
+        w1_list = [w1[i,:,:].squeeze() for i in range(num_experts)]
+        w2_list = [w2[i,:,:].squeeze() for i in range(num_experts)]
+
+        final_hidden_states = torch.ops.hpu.mixture_of_experts(
+            hidden_states=hidden_states,
+            expert_routing_table=selected_experts,
+            router_weights=routing_weights,
+            w12=w1_list,
+            w3=w2_list,
+            permuted_weights=True,
+            activation="silu",
+            experts_min=0,
+            experts_max=7
+        )
+        return final_hidden_states.view(-1, D)

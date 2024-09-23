@@ -12,6 +12,7 @@ from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig, QuantizeMethodBase)
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.utils import is_hpu
+import os
 
 logger = init_logger(__name__)
 
@@ -202,8 +203,15 @@ class FusedMoE(torch.nn.Module):
         self.num_expert_group = num_expert_group
         self.topk_group = topk_group
         if is_hpu():
-            from vllm.hpu.ops import StaticFusedMOE
-            self.hpu_static_fused_moe = StaticFusedMOE(self.num_experts)
+            dynamic_fused = os.getenv('DYNAMIC_FUSED_MOE', "true")
+            if dynamic_fused == "true":
+                logger.info("dynamic_fused_moe is getting used")
+                from vllm.hpu.ops import DynamicFusedMOE
+                self.hpu_static_fused_moe = DynamicFusedMOE(self.num_experts)
+            else:
+                logger.info("static_fused_moe is getting used")
+                from vllm.hpu.ops import StaticFusedMOE
+                self.hpu_static_fused_moe = StaticFusedMOE(self.num_experts)
 
         if quant_config is None:
             self.quant_method: Optional[QuantizeMethodBase] = (
