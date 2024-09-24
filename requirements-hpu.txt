@@ -7,5 +7,4 @@ triton
 pandas
 tabulate
 
-vllm-hpu-extension @ git+https://github.com/HabanaAI/vllm-hpu-extension.git@0e05e25
-
+vllm-hpu-extension @ git+https://github.com/HabanaAI/vllm-hpu-extension.git@0a7adab
