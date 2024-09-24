@@ -513,6 +513,10 @@ class LLMEngine:
                 initialize_ray_cluster(engine_config.parallel_config)
                 from vllm.executor.ray_habana_executor import RayHabanaExecutor
                 executor_class = RayHabanaExecutor
+            elif distributed_executor_backend == "mp":
+                from vllm.executor.multiproc_habana_executor import (
+                    MultiprocessingHabanaExecutor)
+                executor_class = MultiprocessingHabanaExecutor
             else:
                 from vllm.executor.habana_executor import HabanaExecutor
                 executor_class = HabanaExecutor

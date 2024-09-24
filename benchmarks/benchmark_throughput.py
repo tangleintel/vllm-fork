@@ -70,6 +70,7 @@ def run_vllm(
     tokenizer: str,
     quantization: Optional[str],
     tensor_parallel_size: int,
+    pipeline_parallel_size: int,
     seed: int,
     n: int,
     use_beam_search: bool,
@@ -97,6 +98,7 @@ def run_vllm(
         tokenizer=tokenizer,
         quantization=quantization,
         tensor_parallel_size=tensor_parallel_size,
+        pipeline_parallel_size=pipeline_parallel_size,
         seed=seed,
         trust_remote_code=trust_remote_code,
         dtype=dtype,
@@ -321,7 +323,7 @@ def main(args: argparse.Namespace):
     if args.backend == "vllm":
         run_args = [
             requests, args.model, args.tokenizer, args.quantization,
-            args.tensor_parallel_size, args.seed, args.n, args.use_beam_search,
+            args.tensor_parallel_size, args.pipeline_parallel_size, args.seed, args.n, args.use_beam_search,
             args.trust_remote_code, args.dtype, args.max_model_len,
             args.enforce_eager, args.kv_cache_dtype,
             args.quantization_param_path, args.device,
@@ -391,6 +393,7 @@ if __name__ == "__main__":
                         choices=[*QUANTIZATION_METHODS, None],
                         default=None)
     parser.add_argument("--tensor-parallel-size", "-tp", type=int, default=1)
+    parser.add_argument("--pipeline-parallel-size", type=int, default=1)
     parser.add_argument("--n",
                         type=int,
                         default=1,

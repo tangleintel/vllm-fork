@@ -527,6 +527,10 @@ class AsyncLLMEngine:
                 from vllm.executor.ray_habana_executor import (
                     RayHabanaExecutorAsync)
                 executor_class = RayHabanaExecutorAsync
+            elif distributed_executor_backend == "mp":
+                from vllm.executor.multiproc_habana_executor import (
+                    MultiprocessingHabanaExecutorAsync)
+                executor_class = MultiprocessingHabanaExecutorAsync
             else:
                 from vllm.executor.habana_executor import HabanaExecutorAsync
                 executor_class = HabanaExecutorAsync
