@@ -686,11 +686,11 @@ class AsyncLLMEngine:
             pipeline_parallel_size = \
                 self.engine.parallel_config.pipeline_parallel_size
         has_requests_in_progress = [False] * pipeline_parallel_size
-        
-        WARMUP_STEP = 0
-        ACTIVE_STEP = 3
+
+        WARMUP_STEP =  0
+        ACTIVE_STEP = 10
         hb_profer = HabanaProfile(
-            warmup=0, active=ACTIVE_STEP, record_shapes=False
+            warmup=WARMUP_STEP, active=ACTIVE_STEP, record_shapes=False
         )
         PROFILE=False
         if PROFILE:

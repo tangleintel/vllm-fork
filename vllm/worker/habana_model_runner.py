@@ -267,6 +267,15 @@ def pad_list(list, k, v):
     padding = target_len - len(list)
     return list + [v] * padding
 
+def precompute_indices_and_offsets(block_size, slot_mapping, is_prompt):
+    slot_mapping = slot_mapping.flatten()
+    indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
+    if is_prompt:
+        indices = indices.unflatten(0, (-1, block_size))[:, 0]
+        offsets = None
+    else:
+        offsets = torch.fmod(slot_mapping, block_size)
+    return indices, offsets
 
 class HpuModelAdapter():
 
@@ -889,12 +898,17 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_lens_tensor = torch.tensor(seq_lens,
                                        dtype=torch.long,
                                        device=self.device)
+        
+        block_indices, block_offsets = precompute_indices_and_offsets(
+            self.block_size, slot_mapping, True)
 
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=True,
             block_list=None,
             block_mapping=None,
             block_usage=None,
+            block_indices=block_indices,
+            block_offsets=block_offsets,
             attn_bias=None,
             seq_lens_tensor=seq_lens_tensor,
             num_prefills=real_num_seqs,
@@ -1045,12 +1059,16 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                     dtype=torch.long,
                                     device=self.device)
 
+        block_indices, block_offsets = precompute_indices_and_offsets(
+            self.block_size, slot_mapping, False)
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=False,
             block_list=block_list,
             block_mapping=block_mapping,
             block_usage=block_usage,
             attn_bias=None,
+            block_indices=block_indices,
+            block_offsets=block_offsets,
             seq_lens_tensor=None,
             num_prefills=0,
             num_prefill_tokens=0,
@@ -1099,11 +1117,10 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         batch_size_padding = batch_size_padded - real_batch_size
         seq_group_metadata_list = seq_group_metadata_list.copy()
 
-        seq_group_metadata_list.extend(seq_group_metadata_list[0]
-                                       for _ in range(batch_size_padding))
-        #if batch_size_padded > 0:
-            #if self.scheduler_config.enable_delayed_sampling and is_prompt:
-                #seq_group_metadata_list.extend(self.create_dummy_seq_group_metadata(0,0,is_prompt) for _ in range(batch_size_padding))
+        #seq_group_metadata_list.extend(seq_group_metadata_list[0]
+        #                               for _ in range(batch_size_padding))
+        if batch_size_padded > 0 and  (not self.scheduler_config.enable_delayed_sampling or (self.scheduler_config.enable_delayed_sampling and is_prompt)):
+        seq_group_metadata_list.extend(self.create_dummy_seq_group_metadata(0,0,is_prompt) for _ in range(batch_size_padding))
 
         prefill_reqs = []
         decode_reqs = []
@@ -1270,7 +1287,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # input_hash("abc") != input_hash("cba")
         attention_metadata = subtuple(metadata, 'TrimmedAttentionMetadata', [
             'attn_bias', 'seq_lens_tensor', 'block_list', 'block_mapping',
-            'block_usage', 'slot_mapping', 'is_prompt'
+            'block_usage', 'slot_mapping', 'is_prompt', 'block_indices',
+            'block_offsets'
         ])
         return attention_metadata
 
