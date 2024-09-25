@@ -1,11 +1,11 @@
 # test_config.yaml
 steps:
-  - name: Test Suite 1
+  - name: test_suite_g1
     flavor: g1
-    command: echo "Hello world 1!"
-  - name: Test Suite 2
+    command: hl-smi
+  - name: test_suite_g2
     flavor: g2
-    command: echo "Hello world 2!"
-  - name: Test Suite 3
+    command: hl-smi
+  - name: test_suite_g3
     flavor: g3
-    command: echo "Hello world 3!"
+    command: hl-smi
