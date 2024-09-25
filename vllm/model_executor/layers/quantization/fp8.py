@@ -120,7 +120,7 @@ class Fp8LinearMethod(LinearMethodBase):
 
     def __init__(self, quant_config: Fp8Config):
         self.quant_config = quant_config
-        if current_platform.is_cuda_alike()
+        if current_platform.is_cuda_alike():
             self.cutlass_fp8_supported = cutlass_fp8_supported()
 
             # For GPUs that lack FP8 hardware support, we can leverage the
