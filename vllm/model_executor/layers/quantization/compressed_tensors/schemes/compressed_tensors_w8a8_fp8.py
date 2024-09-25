@@ -13,6 +13,7 @@ from vllm.model_executor.layers.quantization.utils.w8a8_utils import (
 from vllm.model_executor.parameter import (ChannelQuantScaleParameter,
                                            ModelWeightParameter,
                                            PerTensorScaleParameter)
+from vllm.platforms import current_platform
 from vllm.utils import is_hip
 
 __all__ = ["CompressedTensorsW8A8Fp8"]
