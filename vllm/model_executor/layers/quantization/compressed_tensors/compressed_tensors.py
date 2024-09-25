@@ -243,8 +243,8 @@ class CompressedTensorsConfig(QuantizationConfig):
         # TODO @dsikka: clean-up conditions
         if is_activation_quantization_format(self.quant_format):
             if self._is_fp8_w8a8(weight_quant, input_quant):
-                is_fp8_w8a8_supported = True if current_platform.is_hpu() \
-                    else self._check_scheme_supported(
+                is_fp8_w8a8_supported = current_platform.is_hpu() or \
+                    self._check_scheme_supported(
                     CompressedTensorsW8A8Fp8.get_min_capability(),
                     error=False)
                 if is_fp8_w8a8_supported:
@@ -316,7 +316,7 @@ class CompressedTensorsConfig(QuantizationConfig):
 
         # Raise error if device does not support the scheme
         # (e.g. fp8 needs ada lovelace)
-        if torch.cuda.is_available():
+        if not current_platform.is_hpu():
             self._check_scheme_supported(scheme.get_min_capability())
 
         return scheme
