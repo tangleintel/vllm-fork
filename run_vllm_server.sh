@@ -51,6 +51,9 @@ hpu_num=1
 eager_mode="Off"
 load_balancer="Off"
 fp8="Off"
+batch_size=100
+max_model_len=4096
+block_size=128
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -176,18 +179,17 @@ export VLLM_PROMPT_BS_BUCKET_STEP=1
 export VLLM_PROMPT_BS_BUCKET_MAX=2
 
 export VLLM_DECODE_BS_BUCKET_MIN=1
-export VLLM_DECODE_BS_BUCKET_STEP=1
+export VLLM_DECODE_BS_BUCKET_STEP=4
 export VLLM_DECODE_BS_BUCKET_MAX=$batch_size
 
-export VLLM_DECODE_BLOCK_BUCKET_MIN=128 #272
-export VLLM_DECODE_BLOCK_BUCKET_STEP=128 #272
+export VLLM_DECODE_BLOCK_BUCKET_MIN=896 #272
+export VLLM_DECODE_BLOCK_BUCKET_STEP=$block_size #272
 
 if [ -n "$input_len" ]; then
     export VLLM_PROMPT_SEQ_BUCKET_MIN=$input_len
     export VLLM_PROMPT_SEQ_BUCKET_STEP=$input_len
-    export VLLM_PROMPT_SEQ_BUCKET_MAX=$(($input_len*2))
-    export VLLM_DECODE_BLOCK_BUCKET_MAX=$(($batch_size*$input_len*2/$VLLM_DECODE_BLOCK_BUCKET_MIN))
-    #VLLM_DECODE_BLOCK_BUCKET_MAX  leaving as default as suggested by R&d
+    export VLLM_PROMPT_SEQ_BUCKET_MAX=$max_model_len
+    export VLLM_DECODE_BLOCK_BUCKET_MAX=$(($batch_size*$max_model_len/$block_size))
 fi
 
 
@@ -207,8 +209,8 @@ python -m vllm.entrypoints.openai.api_server --port 8084 \
         --max-num-seqs $batch_size \
         --disable-log-requests \
         --dtype bfloat16 \
-        --block-size 128 \
-        --max-model-len 4096 \
+        --block-size $block_size \
+        --max-model-len $max_model_len \
         --gpu-memory-utilization 0.98 \
         --enable-delayed-sampling \
         --num-lookahead-slots 1 \
