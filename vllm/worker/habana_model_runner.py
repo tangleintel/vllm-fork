@@ -147,7 +147,7 @@ def warmup_range(config: Tuple[int, int, int]):
     """Generate a warmup range.
 
     Start from bmin and multiply by 2 until you reach bstep.
-    Then, increase the values in the range by the value of bstep until you 
+    Then, increase the values in the range by the value of bstep until you
     reach bmax.
 
     Example:
@@ -1099,11 +1099,9 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         batch_size_padding = batch_size_padded - real_batch_size
         seq_group_metadata_list = seq_group_metadata_list.copy()
 
-        seq_group_metadata_list.extend(seq_group_metadata_list[0]
-                                       for _ in range(batch_size_padding))
-        #if batch_size_padded > 0:
-            #if self.scheduler_config.enable_delayed_sampling and is_prompt:
-                #seq_group_metadata_list.extend(self.create_dummy_seq_group_metadata(0,0,is_prompt) for _ in range(batch_size_padding))
+        if batch_size_padded > 0:
+            if not self.scheduler_config.enable_delayed_sampling or (self.scheduler_config.enable_delayed_sampling and is_prompt):
+                seq_group_metadata_list.extend(self.create_dummy_seq_group_metadata(0,0,is_prompt) for _ in range(batch_size_padding))
 
         prefill_reqs = []
         decode_reqs = []
@@ -1980,7 +1978,7 @@ class HabanaModelRunner(
                 # Only after dispatching next model.forward() read and update
                 # the previous token ids to return
                 sampled_token_ids = output.sampled_token_ids.tolist()
-                i = 0 
+                i = 0
                 for seq_group_output in output.outputs[:real_batch_size]:
                     for sample in seq_group_output.samples:
                         #sample.output_token = sampled_token_ids[sample.output_token][0]
