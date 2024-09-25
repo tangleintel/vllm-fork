@@ -1120,7 +1120,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         #seq_group_metadata_list.extend(seq_group_metadata_list[0]
         #                               for _ in range(batch_size_padding))
         if batch_size_padded > 0 and  (not self.scheduler_config.enable_delayed_sampling or (self.scheduler_config.enable_delayed_sampling and is_prompt)):
-        seq_group_metadata_list.extend(self.create_dummy_seq_group_metadata(0,0,is_prompt) for _ in range(batch_size_padding))
+            seq_group_metadata_list.extend(self.create_dummy_seq_group_metadata(0,0,is_prompt) for _ in range(batch_size_padding))
 
         prefill_reqs = []
         decode_reqs = []

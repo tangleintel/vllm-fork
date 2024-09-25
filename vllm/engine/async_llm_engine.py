@@ -692,7 +692,7 @@ class AsyncLLMEngine:
         hb_profer = HabanaProfile(
             warmup=WARMUP_STEP, active=ACTIVE_STEP, record_shapes=False
         )
-        PROFILE=True
+        PROFILE=False
         if PROFILE:
             hb_profer.start()
 
