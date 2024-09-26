@@ -27,7 +27,6 @@ import torch.types
 from typing_extensions import ParamSpec
 
 import vllm.envs as envs
-from vllm import _custom_ops as ops
 from vllm.logger import enable_trace_function_call, init_logger
 
 logger = init_logger(__name__)
