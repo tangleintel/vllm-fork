@@ -69,6 +69,7 @@ def flat_pa(query, key_cache, value_cache, block_list, block_mapping,
     kv_heads = key_cache.size(2)
 
     query = batch2block(scale * query, block_mapping).unsqueeze(-2)
+
     key = keys_fetch_func(key_cache, block_list).transpose(1, 2)
     value = values_fetch_func(value_cache, block_list).transpose(1, 2)
     block_bias = block_bias.view(key.size(0), 1, 1, -1)
@@ -145,9 +146,6 @@ def prompt_attention(
             attn_weights = attn_weights.flatten(1, 2)
     else:
         #TODO: remove after fusedsdpa fix for query_heads != kv_heads
-        if query_heads != kv_heads:
-            key = repeat_kv(key, int(query_heads // kv_heads))
-            value = repeat_kv(value, int(query_heads // kv_heads))
         softmax_mode = 'fast'
         recompute_mode = True
         attn_weights = FusedSDPA.apply(query, key, value, None, 0.0, True,

@@ -236,6 +236,15 @@ def pad_list(list, k, v):
     padding = target_len - len(list)
     return list + [v] * padding
 
+def precompute_indices_and_offsets(block_size, slot_mapping, is_prompt):
+    slot_mapping = slot_mapping.flatten()
+    indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
+    if is_prompt:
+        indices = indices.unflatten(0, (-1, block_size))[:, 0]
+        offsets = None
+    else:
+        offsets = torch.fmod(slot_mapping, block_size)
+    return indices, offsets
 
 class HpuModelAdapter():
 
@@ -652,7 +661,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if self.lora_config and \
             max_bucket_cfg > self.max_num_batched_tokens // self.block_size:
             max_bucket_cfg = self.max_num_batched_tokens // self.block_size
-        blocks_step = 128
+        #blocks_step = 128
         #FIXME: The default values should be max_model_len
         max_prompt_seq = 1024
         max_decode_seq = 2048
@@ -664,7 +673,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             max=align_bs(max_bucket_cfg))
         self.decode_bs_bucket_cfg = read_bucket_settings('decode',
                                                          'bs',
-                                                         min=align_bs(32),
+                                                         min=1,
                                                          step=align_bs(32),
                                                          max=self.max_num_seqs)
         self.prompt_seq_bucket_cfg = read_bucket_settings('prompt',
@@ -675,9 +684,9 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.decode_block_bucket_cfg = read_bucket_settings(
             'decode',
             'block',
-            min=blocks_step,
-            step=blocks_step,
-            max=max(blocks_step,
+            min=self.block_size,
+            step=self.block_size,
+            max=max(self.block_size,
                     self.max_num_seqs * max_decode_seq // self.block_size))
         self.graphed_buckets: Set[Any] = set()
 
@@ -881,12 +890,15 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         seq_lens_tensor = torch.tensor(seq_lens,
                                        dtype=torch.long,
                                        device=self.device)
-
+        block_indices, block_offsets = precompute_indices_and_offsets(
+            self.block_size, slot_mapping, True)
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=True,
             block_list=None,
             block_mapping=None,
             block_usage=None,
+            block_indices=block_indices,
+            block_offsets=block_offsets,
             attn_bias=None,
             seq_lens_tensor=seq_lens_tensor,
             num_prefills=real_num_seqs,
@@ -1032,12 +1044,15 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         slot_mapping = torch.tensor(slot_mapping,
                                     dtype=torch.long,
                                     device=self.device)
-
+        block_indices, block_offsets = precompute_indices_and_offsets(
+            self.block_size, slot_mapping, False)
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=False,
             block_list=block_list,
             block_mapping=block_mapping,
             block_usage=block_usage,
+            block_indices=block_indices,
+            block_offsets=block_offsets,
             attn_bias=None,
             seq_lens_tensor=None,
             num_prefills=0,
@@ -1255,7 +1270,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # input_hash("abc") != input_hash("cba")
         attention_metadata = subtuple(metadata, 'TrimmedAttentionMetadata', [
             'attn_bias', 'seq_lens_tensor', 'block_list', 'block_mapping',
-            'block_usage', 'slot_mapping', 'is_prompt'
+            'block_usage', 'slot_mapping', 'is_prompt', 'block_indices',
+            'block_offsets'
         ])
         return attention_metadata
 
@@ -1369,6 +1385,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if is_pt_profiler_run and self.is_driver_worker:
             profiler = setup_profiler()
             profiler.start()
+
+
         for _ in range(times):
             inputs = self.prepare_model_input(seqs)
             self.execute_model(inputs, kv_caches, warmup_mode=True)
@@ -1568,7 +1586,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 graph_free_mem = align_workers(graph_free_mem,
                                                torch.distributed.ReduceOp.MIN)
                 prompt_graph_mem_ratio = float(
-                    os.environ.get('VLLM_GRAPH_PROMPT_RATIO', '0.5'))
+                    os.environ.get('VLLM_GRAPH_PROMPT_RATIO', '0.3'))
                 prompt_available_memory = (prompt_graph_mem_ratio *
                                            graph_free_mem)
                 decode_available_memory = (graph_free_mem -
@@ -1888,12 +1906,12 @@ class HabanaModelRunner(
                         else:
                             # warmup only, TODO add a check
                             logits_tensor_list.append(
-                                torch.zeros([1, 32000],
+                                torch.zeros([1, self.vocab_size],
                                             dtype=torch.float,
                                             device="hpu"))
             if logits_tensor is not None:
                 logits_tensor_list.append(logits_tensor[torch.tensor(
-                    logits_ids_list, device=seq_data.prev_logits.device)])
+                    logits_ids_list, device=logits_tensor.device)])
 
             prev_logits = torch.cat(logits_tensor_list, dim=0)
 
