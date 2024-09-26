@@ -13,7 +13,7 @@ from transformers import (AutoModelForCausalLM, AutoTokenizer,
 from vllm.engine.arg_utils import EngineArgs
 from vllm.model_executor.layers.quantization import QUANTIZATION_METHODS
 from vllm.utils import FlexibleArgumentParser
-
+import os
 
 def sample_requests(
     dataset_path: str,
@@ -436,4 +436,9 @@ if __name__ == "__main__":
         if args.tokenizer != args.model:
             raise ValueError("Tokenizer must be the same as the model for MII "
                              "backend.")
+
+    PT_HPU_LAZY_MODE = os.getenv('PT_HPU_LAZY_MODE', '1')
+    PT_HPU_ENABLE_REFINE_DYNAMIC_SHAPES = os.getenv('PT_HPU_ENABLE_REFINE_DYNAMIC_SHAPES', '1')
+    if not args.enforce_eager and PT_HPU_LAZY_MODE == '0':
+        PT_HPU_ENABLE_REFINE_DYNAMIC_SHAPES = '0' #disable dynamic shapes
     main(args)
