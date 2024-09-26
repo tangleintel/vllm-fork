@@ -798,6 +798,20 @@ class VllmRunner:
         outputs = self.generate(prompts, beam_search_params)
         return outputs
 
+    def generate_beam_search_new(
+        self,
+        prompts: Union[List[str], List[List[int]]],
+        beam_width: int,
+        max_tokens: int,
+    ) -> List[Tuple[List[List[int]], List[str]]]:
+        outputs = self.model.beam_search(prompts, beam_width, max_tokens)
+        returned_outputs = []
+        for output in outputs:
+            token_ids = [x.tokens for x in output.sequences]
+            texts = [x.text for x in output.sequences]
+            returned_outputs.append((token_ids, texts))
+        return returned_outputs
+
     def encode(self, prompts: List[str]) -> List[List[float]]:
         req_outputs = self.model.encode(prompts)
         outputs = []
@@ -849,18 +863,10 @@ def caplog_vllm(temporary_enable_log_propagate, caplog):
     yield caplog
 
 
-def is_hpu():
-    from importlib import util
-    return util.find_spec('habana_frameworks') is not None
-
-
 @pytest.fixture(scope="session")
 def num_gpus_available():
     """Get number of GPUs without initializing the CUDA context
     in current process."""
-
-    if is_hpu():
-        return torch.hpu.device_count()
 
     return cuda_device_count_stateless()
 
