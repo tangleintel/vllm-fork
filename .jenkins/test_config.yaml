@@ -9,3 +9,6 @@ steps:
   - name: test_suite_g3
     flavor: g3
     command: hl-smi
+  - name: test_suite_g3_2
+    flavor: g3
+    command: hl-smi
