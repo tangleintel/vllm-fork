@@ -8,9 +8,10 @@ from vllm.executor.executor_base import ExecutorAsyncBase
 from vllm.executor.habana_executor import HabanaExecutor
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
-from vllm.sequence import ExecuteModelRequest, SamplerOutput
+from vllm.sequence import ExecuteModelRequest
+from vllm.model_executor.layers.sampler import SamplerOutput
 
-from vllm.utils import HabanaMemoryProfiler
+from vllm_hpu_extension.profiler import HabanaMemoryProfiler
 
 logger = init_logger(__name__)
 
