@@ -17,7 +17,7 @@ os.environ['VLLM_PROMPT_BS_BUCKET_STEP']="1"
 os.environ['VLLM_PROMPT_BS_BUCKET_MAX']="2"
 
 
-os.environ['VLLM_DECODE_BLOCK_BUCKET_MIN']="896"
+os.environ['VLLM_DECODE_BLOCK_BUCKET_MIN']="1024"
 os.environ['VLLM_DECODE_BLOCK_BUCKET_STEP']=str(BLOCK_SIZE)
 
 os.environ['PT_HPU_ENABLE_LAZY_COLLECTIVES']="True"
@@ -39,7 +39,7 @@ def params():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('-m', '--model_path',
-        type=str, required=False, default="/mnt/weka/data/mixtral/models--mistralai--Mixtral-8x7B-Instruct-v0.1/snapshots/1e637f2d7cb0a9d6fb1922f305cb784995190a83/")
+        type=str, required=False, default="/scratch4/models/models--mistralai--Mixtral-8x7B-Instruct-v0.1/snapshots/41bd4c9e7e4fb318ca40e721131d4933966c2cc1/")
     parser.add_argument('-i', '--input_size',
         type=str, required=True)
     parser.add_argument('-o', '--output_size',
@@ -53,7 +53,7 @@ def params():
     parser.add_argument('-d', '--dtype',
         type=str, default='bfloat16')
     parser.add_argument('-q', '--quantization',
-        type=str, default=None)
+        type=str, default='inc')
     parser.add_argument('-k', '--kv_cache_dtype',
         type=str, default='auto')
     parser.add_argument('-u', '--gpu_memory_utilization',
@@ -82,8 +82,8 @@ def llm():
 
     fmwork.banner('LLM')
 
-    os.environ['VLLM_DECODE_BS_BUCKET_MIN']="1"
-    os.environ['VLLM_DECODE_BS_BUCKET_STEP']="4"
+    os.environ['VLLM_DECODE_BS_BUCKET_MIN']=str(max(var.batch_sizes))
+    os.environ['VLLM_DECODE_BS_BUCKET_STEP']=str(max(var.batch_sizes))
     os.environ['VLLM_DECODE_BS_BUCKET_MAX']=str(max(var.batch_sizes))
 
     max_model_len = max(var.input_sizes) + max(var.output_sizes)
@@ -95,6 +95,9 @@ def llm():
 
     if par.disable_dynamic_moe:
         os.environ['DYNAMIC_FUSED_MOE']="False"
+    
+    if par.quantization:
+        os.environ['QUANT_CONFIG'] = "/root/npu-stack/vllm-benchmarks/models/mixtral-8x7b/inc/config_maxabs_hw_quant.json"
 
     var.llm = vllm.LLM(
         dtype                  = par.dtype,
@@ -109,6 +112,7 @@ def llm():
         enable_delayed_sampling= True,
         use_v2_block_manager   = True,
         num_lookahead_slots    = 1,
+        weights_load_device    = 'cpu',
     )
 
 def runs():
