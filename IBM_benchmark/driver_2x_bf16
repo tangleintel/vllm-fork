@@ -11,16 +11,7 @@ BLOCK_SIZE=128
 VLLM_DECODE_BLOCK_BUCKET_MAX=7168
 os.environ['EXPERIMENTAL_WEIGHT_SHARING']="0"
 os.environ['VLLM_ENGINE_ITERATION_TIMEOUT_S']="600"
-
 os.environ['VLLM_GRAPH_RESERVED_MEM']="0.3"
-os.environ['VLLM_PROMPT_BS_BUCKET_MIN']="1"
-os.environ['VLLM_PROMPT_BS_BUCKET_STEP']="1"
-os.environ['VLLM_PROMPT_BS_BUCKET_MAX']="2"
-
-
-os.environ['VLLM_DECODE_BLOCK_BUCKET_MIN']=str(1792)
-os.environ['VLLM_DECODE_BLOCK_BUCKET_STEP']=str(BLOCK_SIZE)
-
 os.environ['PT_HPU_ENABLE_LAZY_COLLECTIVES']="True"
 
 class var: pass
@@ -83,14 +74,23 @@ def llm():
 
     fmwork.banner('LLM')
 
-    os.environ['VLLM_DECODE_BS_BUCKET_MIN']=str(max(var.batch_sizes))
-    os.environ['VLLM_DECODE_BS_BUCKET_STEP']=str(max(var.batch_sizes))
-    os.environ['VLLM_DECODE_BS_BUCKET_MAX']=str(max(var.batch_sizes))
+    os.environ['VLLM_PROMPT_BS_BUCKET_MIN']="1"
+    os.environ['VLLM_PROMPT_BS_BUCKET_STEP']="1"
+    os.environ['VLLM_PROMPT_BS_BUCKET_MAX']="2"
+
     max_model_len = max(var.input_sizes) + max(var.output_sizes)
     os.environ['VLLM_PROMPT_SEQ_BUCKET_MIN']=str(max(var.input_sizes))
     os.environ['VLLM_PROMPT_SEQ_BUCKET_STEP']=str(max(var.input_sizes))
     os.environ['VLLM_PROMPT_SEQ_BUCKET_MAX']=str(max_model_len)
+
+    os.environ['VLLM_DECODE_BS_BUCKET_MIN']=str(max(var.batch_sizes))
+    os.environ['VLLM_DECODE_BS_BUCKET_STEP']=str(max(var.batch_sizes))
+    os.environ['VLLM_DECODE_BS_BUCKET_MAX']=str(max(var.batch_sizes))
+
+    os.environ['VLLM_DECODE_BLOCK_BUCKET_MIN']=str(BLOCK_SIZE)
+    os.environ['VLLM_DECODE_BLOCK_BUCKET_STEP']=str(BLOCK_SIZE)
     os.environ['VLLM_DECODE_BLOCK_BUCKET_MAX']=str(VLLM_DECODE_BLOCK_BUCKET_MAX)
+
 
     if par.disable_dynamic_moe:
         os.environ['DYNAMIC_FUSED_MOE']="False"
