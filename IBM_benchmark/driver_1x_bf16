@@ -42,11 +42,11 @@ def params():
     parser.add_argument('-m', '--model_path',
         type=str, required=False, default="/mnt/weka/data/mixtral/models--mistralai--Mixtral-8x7B-Instruct-v0.1/snapshots/1e637f2d7cb0a9d6fb1922f305cb784995190a83/")
     parser.add_argument('-i', '--input_size',
-        type=str, required=True)
+        type=str, required=False, default=1024)
     parser.add_argument('-o', '--output_size',
-        type=str, required=True)
+        type=str, required=False, default=1024)
     parser.add_argument('-b', '--batch_size',
-        type=str, required=True)
+        type=str, required=False, default=104)
     parser.add_argument('-t', '--tensor_parallel',
         type=int, required=False, default=1)
     parser.add_argument('-r', '--reps',
