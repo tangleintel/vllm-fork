@@ -1,0 +1,163 @@
+#!/usr/bin/env -S python -u
+
+import argparse
+import fmwork
+import torch
+import traceback
+import vllm
+import os
+
+BLOCK_SIZE=128
+VLLM_DECODE_BLOCK_BUCKET_MAX=7168
+os.environ['EXPERIMENTAL_WEIGHT_SHARING']="0"
+os.environ['VLLM_ENGINE_ITERATION_TIMEOUT_S']="600"
+
+os.environ['VLLM_GRAPH_RESERVED_MEM']="0.3"
+os.environ['VLLM_PROMPT_BS_BUCKET_MIN']="1"
+os.environ['VLLM_PROMPT_BS_BUCKET_STEP']="1"
+os.environ['VLLM_PROMPT_BS_BUCKET_MAX']="2"
+
+
+os.environ['VLLM_DECODE_BLOCK_BUCKET_MIN']=str(1792)
+os.environ['VLLM_DECODE_BLOCK_BUCKET_STEP']=str(BLOCK_SIZE)
+
+os.environ['PT_HPU_ENABLE_LAZY_COLLECTIVES']="True"
+
+class var: pass
+class par: pass
+
+def main():
+
+    params()
+    llm()
+    runs()
+    done()
+
+def params():
+
+    fmwork.banner('PARAMS')
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('-m', '--model_path',
+        type=str, required=False, default="/mnt/weka/data/mixtral/models--mistralai--Mixtral-8x7B-Instruct-v0.1/snapshots/1e637f2d7cb0a9d6fb1922f305cb784995190a83/")
+    parser.add_argument('-i', '--input_size',
+        type=str, required=False, default=1024)
+    parser.add_argument('-o', '--output_size',
+        type=str, required=False, default=1024)
+    parser.add_argument('-b', '--batch_size',
+        type=str, required=False, default=256)
+    parser.add_argument('-t', '--tensor_parallel',
+        type=int, required=False, default=2)
+    parser.add_argument('-r', '--reps',
+        type=int, default=3)
+    parser.add_argument('-d', '--dtype',
+        type=str, default='bfloat16')
+    parser.add_argument('-q', '--quantization',
+        type=str, default=None)
+    parser.add_argument('-k', '--kv_cache_dtype',
+        type=str, default='auto')
+    parser.add_argument('-u', '--gpu_memory_utilization',
+        type=float, default=0.98)
+    parser.add_argument('-e', '--enforce_eager',
+        action='store_true')
+    parser.add_argument('--disable_dynamic_moe',
+        action='store_true')
+
+    parser.parse_args(namespace=par)
+
+    attrs = []
+    for attr in dir(par):
+        if not attr.startswith('__') and not attr.endswith('__'):
+            attrs.append(attr)
+    pad = max([len(x) for x in attrs])
+    for attr in sorted(attrs):
+        print('%-*s = %s' % (
+            pad, attr, getattr(par, attr)))
+
+    var.input_sizes  = list(map(int, par.input_size.split(',')))
+    var.output_sizes = list(map(int, par.output_size.split(',')))
+    var.batch_sizes  = list(map(int, par.batch_size.split(',')))
+
+def llm():
+
+    fmwork.banner('LLM')
+
+    os.environ['VLLM_DECODE_BS_BUCKET_MIN']=str(max(var.batch_sizes))
+    os.environ['VLLM_DECODE_BS_BUCKET_STEP']=str(max(var.batch_sizes))
+    os.environ['VLLM_DECODE_BS_BUCKET_MAX']=str(max(var.batch_sizes))
+    max_model_len = max(var.input_sizes) + max(var.output_sizes)
+    os.environ['VLLM_PROMPT_SEQ_BUCKET_MIN']=str(max(var.input_sizes))
+    os.environ['VLLM_PROMPT_SEQ_BUCKET_STEP']=str(max(var.input_sizes))
+    os.environ['VLLM_PROMPT_SEQ_BUCKET_MAX']=str(max_model_len)
+    os.environ['VLLM_DECODE_BLOCK_BUCKET_MAX']=str(VLLM_DECODE_BLOCK_BUCKET_MAX)
+
+    if par.disable_dynamic_moe:
+        os.environ['DYNAMIC_FUSED_MOE']="False"
+
+    var.llm = vllm.LLM(
+        dtype                  = par.dtype,
+        enforce_eager          = par.enforce_eager,
+        gpu_memory_utilization = par.gpu_memory_utilization,
+        kv_cache_dtype         = par.kv_cache_dtype,
+        max_model_len          = max(var.input_sizes) + max(var.output_sizes),
+        model                  = par.model_path,
+        quantization           = par.quantization,
+        tensor_parallel_size   = par.tensor_parallel,
+        trust_remote_code      = True,
+        enable_delayed_sampling= True,
+        use_v2_block_manager   = True,
+        num_lookahead_slots    = 1,
+    )
+
+def runs():
+
+    for batch_size in var.batch_sizes:
+        for input_size in var.input_sizes:
+            for output_size in var.output_sizes:
+                run(input_size, output_size, batch_size)
+
+def run(input_size, output_size, batch_size):
+
+    fmwork.banner(
+        'RUN',
+        input_size,  '/',
+        output_size, '/',
+        batch_size,  '/',
+        par.tensor_parallel
+    )
+
+    input_batch = fmwork.input_generator(
+        par.model_path,
+        input_size, batch_size,
+        return_tensors='np',
+    )
+
+    sampling_params = vllm.SamplingParams(
+        max_tokens = output_size,
+        ignore_eos = True,
+    )
+
+    kwargs = {
+        'prompt_token_ids' : input_batch,
+        'sampling_params'  : sampling_params,
+        'use_tqdm'         : False,
+    }
+
+    fmwork.reset()
+
+    for rep in range(par.reps):
+        fmwork.t0()
+        var.llm.generate(**kwargs)
+        #torch.cuda.synchronize()
+        fmwork.t1(
+            rep, par.reps,
+            input_size, output_size, batch_size,
+            par.tensor_parallel)
+
+def done():
+
+    fmwork.banner('DONE')
+
+if __name__ == '__main__': main()
+
