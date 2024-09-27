@@ -83,8 +83,8 @@ def llm():
 
     fmwork.banner('LLM')
 
-    os.environ['VLLM_DECODE_BS_BUCKET_MIN']="1"
-    os.environ['VLLM_DECODE_BS_BUCKET_STEP']="8"
+    os.environ['VLLM_DECODE_BS_BUCKET_MIN']=str(max(var.batch_sizes))
+    os.environ['VLLM_DECODE_BS_BUCKET_STEP']=str(max(var.batch_sizes))
     os.environ['VLLM_DECODE_BS_BUCKET_MAX']=str(max(var.batch_sizes))
     max_model_len = max(var.input_sizes) + max(var.output_sizes)
     os.environ['VLLM_PROMPT_SEQ_BUCKET_MIN']=str(max(var.input_sizes))
