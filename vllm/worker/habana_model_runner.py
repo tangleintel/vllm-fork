@@ -42,7 +42,7 @@ from vllm.sampling_params import SamplingParams
 from vllm.sequence import (IntermediateTensors, SequenceData,
                            SequenceGroupMetadata)
 from vllm.utils import (is_fake_hpu, is_pin_memory_available,
-                        make_tensor_with_pad)
+                        make_tensor_with_pad, get_vllm_instance_id)
 from vllm.worker.model_runner_base import (
     ModelRunnerBase, ModelRunnerInputBase,
     _add_attn_metadata_broadcastable_dict,
@@ -563,7 +563,15 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.lora_manager: LRUCacheWorkerLoRAManager = None
         self.model: torch.nn.Module = None
         self.inc_initialized_successfully = False
-        self.loaded_bucketing_config_from_file = False
+        self.calibrate_buckets = os.environ.get('VLLM_HPU_CALIBRATE_BUCKETS',
+                                                'false') in ['true', '1']
+        self.bucket_cfg_file = os.environ.get('VLLM_HPU_BUCKET_CFG', None)
+        # Set default filename only if bucket calibration is enabled
+        if self.calibrate_buckets and self.bucket_cfg_file is None:
+            vllm_instance_id = get_vllm_instance_id()
+            self.bucket_cfg_file = f'hpu-buckets-{vllm_instance_id}.yaml'
+            msg = f"Calibration results will be saved to {self.bucket_cfg_file}"
+            logger.info(msg)
 
         # Profiler stats
         self.profiler_counter_helper = HabanaProfilerCounterHelper()
@@ -595,8 +603,9 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.multi_modal_input_mapper = MULTIMODAL_REGISTRY \
             .create_input_mapper(self.model_config)
 
-        self.skip_warmup = os.environ.get('VLLM_SKIP_WARMUP',
-                                          'false').lower() == 'true'
+        self.skip_warmup = os.environ.get(
+            'VLLM_SKIP_WARMUP',
+            'false').lower() == 'true' or self.calibrate_buckets
 
     def load_model(self) -> None:
         import habana_frameworks.torch.core as htcore
@@ -685,47 +694,60 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         #FIXME: The default values should be max_model_len
         max_prompt_seq = 1024
         max_decode_seq = 2048
-        
-        DefaultBucketConfig = collections.namedtuple('DefaultBucketConfig', ['min','step','max','from_file'])
-        prompt_bs_bucket_cfg_defaults = DefaultBucketConfig(min=1,max=align_bs(32),step=align_bs(max_bucket_cfg), from_file=False)
-        prompt_seq_bucket_cfg_defaults = DefaultBucketConfig(min=self.block_size,max=self.block_size,step=max_prompt_seq, from_file=False)
-        decode_bs_bucket_cfg_defaults = DefaultBucketConfig(min=1,max=align_bs(32),step=align_bs(max_bucket_cfg), from_file=False)
-        decode_block_bucket_cfg_defaults = DefaultBucketConfig(min=self.block_size, step=self.block_size, max=max(self.block_size,self.max_num_seqs * max_decode_seq // self.block_size), from_file=False)
-        
-        bucket_cfg_file = os.environ.get('VLLM_HPU_BUCKET_CFG', None)
-        if bucket_cfg_file is not None:
-            import pandas as pd
-            import yaml
-            try:
-                with open(bucket_cfg_file, 'r') as f:
-                    data = yaml.safe_load(f)
-                prompt_bs_bucket_cfg_defaults = DefaultBucketConfig(*data['bucket_cfg']['prompt_bs_bucket_cfg'], from_file=True)
-                prompt_seq_bucket_cfg_defaults = DefaultBucketConfig(*data['bucket_cfg']['prompt_seq_bucket_cfg'], from_file=True)
-                decode_bs_bucket_cfg_defaults = DefaultBucketConfig(*data['bucket_cfg']['decode_bs_bucket_cfg'], from_file=True)
-                decode_block_bucket_cfg_defaults = DefaultBucketConfig(*data['bucket_cfg']['decode_block_bucket_cfg'], from_file=True)
-                df = pd.DataFrame.from_dict(data['records'])
-                self.prompt_buckets = df[df['is_prefill'] == True][['batch_size','seq_or_block']].values.tolist()
-                self.decode_buckets = df[df['is_prefill'] == False][['batch_size','seq_or_block']].values.tolist()
-                self.loaded_bucketing_config_from_file = True
-            except (FileNotFoundError, IOError, PermissionError):
-                msg = "Could not open file specified in VLLM_HPU_BUCKET_CFG: {bucket_cfg_file}. Falling back to default config."
-                logger.error(msg)
-                
+
+        DefaultBucketConfig = collections.namedtuple(
+            'DefaultBucketConfig', ['min', 'step', 'max', 'from_file'])
+        prompt_bs_bucket_cfg_defaults = DefaultBucketConfig(
+            min=1,
+            step=align_bs(32),
+            max=align_bs(max_bucket_cfg),
+            from_file=False)
+        prompt_seq_bucket_cfg_defaults = DefaultBucketConfig(
+            min=self.block_size,
+            step=self.block_size,
+            max=max_prompt_seq,
+            from_file=False)
+        decode_bs_bucket_cfg_defaults = DefaultBucketConfig(
+            min=1,
+            step=align_bs(32),
+            max=align_bs(max_bucket_cfg),
+            from_file=False)
+        decode_block_bucket_cfg_defaults = DefaultBucketConfig(
+            min=self.block_size,
+            step=self.block_size,
+            max=max(self.block_size,
+                    self.max_num_seqs * max_decode_seq // self.block_size),
+            from_file=False)
+
+        # Do not load bucket config from file during bucket calibration
+        if self.bucket_cfg_file is not None and not self.calibrate_buckets:
+            bucket_settings, (
+                prompt_buckets,
+                decode_buckets) = self.deserialize_bucket_settings(
+                    self.bucket_cfg_file)
+            if bucket_settings is not None:
+                prompt_bs_bucket_cfg_defaults = DefaultBucketConfig(
+                    **bucket_settings['prompt_bs_bucket_cfg'], from_file=True)
+                prompt_seq_bucket_cfg_defaults = DefaultBucketConfig(
+                    **bucket_settings['prompt_seq_bucket_cfg'], from_file=True)
+                decode_bs_bucket_cfg_defaults = DefaultBucketConfig(
+                    **bucket_settings['decode_bs_bucket_cfg'], from_file=True)
+                decode_block_bucket_cfg_defaults = DefaultBucketConfig(
+                    **bucket_settings['decode_block_bucket_cfg'],
+                    from_file=True)
+            if prompt_buckets is not None:
+                self.prompt_buckets = prompt_buckets
+            if decode_buckets is not None:
+                self.decode_buckets = decode_buckets
+
         self.prompt_bs_bucket_cfg = read_bucket_settings(
-            'prompt',
-            'bs',
-            **prompt_bs_bucket_cfg_defaults._asdict())
-        self.decode_bs_bucket_cfg = read_bucket_settings('decode',
-                                                         'bs',
-                                                         **decode_bs_bucket_cfg_defaults._asdict())
-        self.prompt_seq_bucket_cfg = read_bucket_settings('prompt',
-                                                          'seq',
-                                                          **prompt_seq_bucket_cfg_defaults._asdict())
+            'prompt', 'bs', **prompt_bs_bucket_cfg_defaults._asdict())
+        self.decode_bs_bucket_cfg = read_bucket_settings(
+            'decode', 'bs', **decode_bs_bucket_cfg_defaults._asdict())
+        self.prompt_seq_bucket_cfg = read_bucket_settings(
+            'prompt', 'seq', **prompt_seq_bucket_cfg_defaults._asdict())
         self.decode_block_bucket_cfg = read_bucket_settings(
-            'decode',
-            'block', 
-            **decode_block_bucket_cfg_defaults._asdict()
-            )
+            'decode', 'block', **decode_block_bucket_cfg_defaults._asdict())
 
         self.graphed_buckets: Set[Any] = set()
 
@@ -738,6 +760,73 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                f"bs:{self.decode_bs_bucket_cfg}, "
                f"block:{self.decode_block_bucket_cfg}")
         logger.info(msg)
+
+        if getattr(self, 'prompt_buckets', None) is not None:
+            msg = (f"Loaded {len(self.prompt_buckets)} "
+                   "prompt buckets from file [bs, seq]: "
+                   f"{list(sorted(self.prompt_buckets))}")
+            logger.info(msg)
+
+        if getattr(self, 'decode_buckets', None) is not None:
+            msg = (f"Loaded {len(self.decode_buckets)} "
+                   f"decode buckets from file [bs, block]: "
+                   f"{list(sorted(self.decode_buckets))}")
+            logger.info(msg)
+
+    def serialize_bucket_settings(self, bucket_cfg_file):
+        import pandas as pd
+        import yaml
+
+        def bucket_cfg_to_dict(cfg):
+            return {'min': cfg[0], 'step': cfg[1], 'max': cfg[2]}
+
+        df = pd.DataFrame(
+            self.seen_configs,
+            columns=['batch_size', 'seq_or_block', 'is_prefill']).sort_values(
+                ['is_prefill', 'batch_size', 'seq_or_block'], ascending=False)
+        data = {}
+        data['buckets'] = df.to_dict(orient='records')
+        data['bucket_cfg'] = {
+            'prompt_bs_bucket_cfg':
+            bucket_cfg_to_dict(self.prompt_bs_bucket_cfg),
+            'prompt_seq_bucket_cfg':
+            bucket_cfg_to_dict(self.prompt_seq_bucket_cfg),
+            'decode_bs_bucket_cfg':
+            bucket_cfg_to_dict(self.decode_bs_bucket_cfg),
+            'decode_block_bucket_cfg':
+            bucket_cfg_to_dict(self.decode_block_bucket_cfg),
+        }
+        with open(bucket_cfg_file, 'w') as outfile:
+            yaml.dump(data, outfile, default_flow_style=False)
+        msg = f"Bucket calibration settings saved to {bucket_cfg_file}"
+        logger.info(msg)
+
+    def deserialize_bucket_settings(self, bucket_cfg_file):
+        import pandas as pd
+        import yaml
+        prompt_buckets = None
+        decode_buckets = None
+        try:
+            with open(bucket_cfg_file, 'r') as f:
+                data = yaml.safe_load(f)
+            # Load min,step,max from file
+            bucket_cfg = data['bucket_cfg']
+            # Load pre-generated buckets, if any
+            if 'buckets' in data:
+                df = pd.DataFrame.from_dict(data['buckets'])
+                prompt_buckets = df[df['is_prefill']][[
+                    'batch_size', 'seq_or_block'
+                ]].values.tolist()
+                prompt_buckets = [tuple(b) for b in prompt_buckets]
+                decode_buckets = df[~df['is_prefill']][[
+                    'batch_size', 'seq_or_block'
+                ]].values.tolist()
+                decode_buckets = [tuple(b) for b in decode_buckets]
+        except (FileNotFoundError, IOError, PermissionError):
+            msg = "Could not open file specified in VLLM_HPU_BUCKET_CFG: "
+            f"{bucket_cfg_file}. Falling back to default config."
+            logger.error(msg)
+        return bucket_cfg, (prompt_buckets, decode_buckets)
 
     def _prepare_prompt(
         self,
@@ -1558,8 +1647,9 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.profiler.start('internal', 'warmup')
         max_blocks = kv_caches[0][0].size(0)
         prompt_omitted_buckets = []
-        if not self.loaded_bucketing_config_from_file:
-            self.prompt_buckets, prompt_omitted_buckets = generate_prompt_buckets(
+        if getattr(self, 'prompt_buckets', None) is None:
+            self.prompt_buckets, prompt_omitted_buckets = \
+                generate_prompt_buckets(
                 self.prompt_bs_bucket_cfg, self.prompt_seq_bucket_cfg,
                 self.max_num_batched_tokens)
         if self.lora_config:
@@ -1574,14 +1664,14 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         logger.info(msg)
 
         msg = (f"Omitted {len(prompt_omitted_buckets)} "
-            "prompt buckets due to exceeded token budget "
-            f"(max_num_batched_tokens={self.max_num_batched_tokens})")
+               "prompt buckets due to exceeded token budget "
+               f"(max_num_batched_tokens={self.max_num_batched_tokens})")
         logger.info(msg)
 
         msg = f"Omitted prompt buckets: {list(sorted(prompt_omitted_buckets))}"
         logger.debug(msg)
 
-        if not self.loaded_bucketing_config_from_file:
+        if getattr(self, 'decode_buckets', None) is None:
             self.decode_buckets = generate_decode_buckets(
                 self.decode_bs_bucket_cfg, self.decode_block_bucket_cfg,
                 max_blocks)
@@ -1873,8 +1963,10 @@ class HabanaModelRunner(
         self.seen_configs.add(cfg)
         if not seen and not warmup_mode:
             phase = 'prompt' if is_prompt else 'decode'
-            logger.warning("Configuration: (%s, %s, %s) was not warmed-up!",
-                           phase, batch_size, seq_len)
+            if not self.calibrate_buckets:
+                logger.warning(
+                    "Configuration: (%s, %s, %s) was not warmed-up!", phase,
+                    batch_size, seq_len)
 
     @torch.inference_mode()
     def execute_model(
@@ -1999,21 +2091,6 @@ class HabanaModelRunner(
             self._is_inc_finalized = True
 
     def __del__(self):
-        calibrate_buckets = os.environ.get('VLLM_HPU_CALIBRATE_BUCKETS', 'false') in ['true', '1']
-        if calibrate_buckets:
-            import pandas as pd
-            import yaml
-            df = pd.DataFrame(self.seen_configs, columns=['batch_size', 'seq_or_block', 'is_prefill']).sort_values(['is_prefill', 'batch_size','seq_or_block'], ascending=False)
-            data = {}
-            data['buckets'] = df.to_dict(orient='records')
-            data['bucket_cfg'] = {
-                'prompt_bs_bucket_cfg': self.prompt_bs_bucket_cfg,
-                'prompt_seq_bucket_cfg': self.prompt_seq_bucket_cfg,
-                'decode_bs_bucket_cfg': self.decode_bs_bucket_cfg,
-                'decode_block_bucket_cfg': self.decode_block_bucket_cfg,
-            }
-            with open('data.yml', 'w') as outfile:
-                yaml.dump(data, outfile, default_flow_style=False)
-
+        if self.calibrate_buckets:
+            self.serialize_bucket_settings(self.bucket_cfg_file)
         self.shutdown_inc()
-
