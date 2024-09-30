@@ -862,7 +862,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self,
         bucket_cfg_file,
         fmt='yaml'
-    ) -> Tuple[Optional[Dict[str, int]], Tuple[Optional[List[Tuple[
+    ) -> Tuple[Optional[Dict[str, Dict[str, int]]], Tuple[Optional[List[Tuple[
             int, int]]], Optional[List[Tuple[int, int]]]]]:
         bucket_cfg = None
         prompt_buckets = None
@@ -889,15 +889,19 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 import yaml
                 with open(bucket_cfg_file, 'r') as f:
                     data = yaml.safe_load(f)
+                assert isinstance(data, dict), "Invalid YAML contents"
                 # Load min,step,max from file
-                bucket_cfg = data['bucket_cfg']
+                bucket_cfg = data.get('bucket_cfg', None)
                 # Load pre-generated buckets, if any
                 if 'buckets' in data:
+                    assert isinstance(data['buckets'], dict), \
+                        "Invalid YAML contents"
                     prompt_buckets = data['buckets']['prefill']
                     prompt_buckets = [tuple(b) for b in prompt_buckets]
                     decode_buckets = data['buckets']['decode']
                     decode_buckets = [tuple(b) for b in decode_buckets]
-            except (FileNotFoundError, IOError, PermissionError):
+            except (FileNotFoundError, IOError, PermissionError,
+                    AssertionError):
                 msg = ("Could not open file specified in VLLM_HPU_BUCKET_CFG: "
                        f"{bucket_cfg_file}. Falling back to default config.")
                 logger.error(msg)
