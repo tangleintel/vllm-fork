@@ -2091,6 +2091,6 @@ class HabanaModelRunner(
             self._is_inc_finalized = True
 
     def __del__(self):
-        if self.calibrate_buckets:
+        if getattr(self, 'calibrate_buckets', False):
             self.serialize_bucket_settings(self.bucket_cfg_file)
         self.shutdown_inc()
