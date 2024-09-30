@@ -97,8 +97,7 @@ def llm():
         os.environ['DYNAMIC_FUSED_MOE']="False"
     
     if par.quantization:
-        #os.environ['QUANT_CONFIG'] = "/root/npu-stack/vllm-benchmarks/models/mixtral-8x7b/inc/config_maxabs_hw_quant.json"
-        os.environ['QUANT_CONFIG'] = "/root/npu-stack/vllm-benchmarks/models/mixtral-8x7b/inc/config_maxabs_hw_quant_2x.json"
+        os.environ['QUANT_CONFIG'] = "/root/npu-stack/vllm-fork/IBM_benchmark/inc/config_maxabs_hw_quant_2x.json"
 
     var.llm = vllm.LLM(
         dtype                  = par.dtype,

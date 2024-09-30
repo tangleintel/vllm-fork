@@ -8,6 +8,10 @@ import vllm
 import os
 
 BLOCK_SIZE=128
+#VLLM_DECODE_BLOCK_BUCKET_MAX=3543
+
+#os.environ['VLLM_PROMPT_USE_FUSEDSDPA']="True"
+
 os.environ['EXPERIMENTAL_WEIGHT_SHARING']="0"
 os.environ['VLLM_ENGINE_ITERATION_TIMEOUT_S']="600"
 
@@ -91,13 +95,13 @@ def llm():
     os.environ['VLLM_PROMPT_SEQ_BUCKET_MIN']=str(max(var.input_sizes))
     os.environ['VLLM_PROMPT_SEQ_BUCKET_STEP']=str(max(var.input_sizes))
     os.environ['VLLM_PROMPT_SEQ_BUCKET_MAX']=str(max_model_len)
-    os.environ['VLLM_DECODE_BLOCK_BUCKET_MAX']=str(max_block_bucket)
+    os.environ['VLLM_DECODE_BLOCK_BUCKET_MAX']=str(max_block_bucket+BLOCK_SIZE)#, VLLM_DECODE_BLOCK_BUCKET_MAX))
 
     if par.disable_dynamic_moe:
         os.environ['DYNAMIC_FUSED_MOE']="False"
     
     if par.quantization:
-        os.environ['QUANT_CONFIG'] = "/root/npu-stack/vllm-benchmarks/models/mixtral-8x7b/inc/config_maxabs_hw_quant.json"
+        os.environ['QUANT_CONFIG'] = "/root/npu-stack/vllm-fork/IBM_benchmark/inc/config_maxabs_hw_quant.json"
 
     var.llm = vllm.LLM(
         dtype                  = par.dtype,
