@@ -573,6 +573,12 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         if self.calibrate_buckets:
             msg = f"Calibration results will be saved to {self.bucket_cfg_file}"
             logger.info(msg)
+        if self.bucket_cfg_file is not None:
+            self.bucket_cfg_file_format = os.path.splitext(
+                self.bucket_cfg_file)[1].strip('.').lower()
+            assert self.bucket_cfg_file_format in [
+                'yml', 'yaml', 'csv'
+            ], 'Calibration file must be either YAML or CSV!'
 
         # Profiler stats
         self.profiler_counter_helper = HabanaProfilerCounterHelper()
@@ -725,7 +731,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             bucket_settings, (
                 prompt_buckets,
                 decode_buckets) = self.deserialize_bucket_settings(
-                    self.bucket_cfg_file)
+                    self.bucket_cfg_file, self.bucket_cfg_file_format)
             if bucket_settings is not None:
                 prompt_bs_bucket_cfg_defaults = DefaultBucketConfig(
                     **bucket_settings['prompt_bs_bucket_cfg'], from_file=True)
@@ -774,12 +780,67 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                    f"{list(sorted(self.decode_buckets))}")
             logger.info(msg)
 
-    def serialize_bucket_settings(self, bucket_cfg_file):
+    def serialize_bucket_settings(self, bucket_cfg_file, fmt='yaml'):
         import pandas as pd
-        import yaml
 
-        def bucket_cfg_to_dict(cfg):
-            return {'min': cfg[0], 'step': cfg[1], 'max': cfg[2]}
+        def yaml_serializer(df, bucket_cfg_file):
+            import yaml
+
+            def bucket_cfg_to_dict(cfg):
+                return {'min': cfg[0], 'step': cfg[1], 'max': cfg[2]}
+
+            data: Dict[str, Any] = {}  # type: ignore
+            #data['buckets'] = df.to_dict(orient='records')
+            buckets_dict = df.groupby('phase').apply(
+                lambda dd: sorted(list([
+                    list(a) for a in zip(dd['batch_size'], dd['seq_or_block'])
+                ]),
+                                  reverse=True)).to_dict()
+            prefill_df = df[df['is_prefill']]
+            decode_df = df[~df['is_prefill']]
+
+            updated_prompt_bs_bucket_cfg = self.prompt_bs_bucket_cfg
+            updated_prompt_bs_bucket_cfg[0] = int(
+                prefill_df['batch_size'].min())
+            updated_prompt_bs_bucket_cfg[2] = int(
+                prefill_df['batch_size'].max())
+            updated_prompt_seq_bucket_cfg = self.prompt_seq_bucket_cfg
+            updated_prompt_seq_bucket_cfg[0] = int(
+                prefill_df['seq_or_block'].min())
+            updated_prompt_seq_bucket_cfg[2] = int(
+                prefill_df['seq_or_block'].max())
+            updated_decode_bs_bucket_cfg = self.decode_bs_bucket_cfg
+            updated_decode_bs_bucket_cfg[0] = int(
+                decode_df['batch_size'].min())
+            updated_decode_bs_bucket_cfg[2] = int(
+                decode_df['batch_size'].max())
+            updated_decode_block_bucket_cfg = self.decode_block_bucket_cfg
+            updated_decode_block_bucket_cfg[0] = int(
+                decode_df['seq_or_block'].min())
+            updated_decode_block_bucket_cfg[2] = int(
+                decode_df['seq_or_block'].max())
+
+            data['bucket_cfg'] = {
+                'prompt_bs_bucket_cfg':
+                bucket_cfg_to_dict(updated_prompt_bs_bucket_cfg),
+                'prompt_seq_bucket_cfg':
+                bucket_cfg_to_dict(updated_prompt_seq_bucket_cfg),
+                'decode_bs_bucket_cfg':
+                bucket_cfg_to_dict(updated_decode_bs_bucket_cfg),
+                'decode_block_bucket_cfg':
+                bucket_cfg_to_dict(updated_decode_block_bucket_cfg),
+            }
+            data['buckets'] = buckets_dict
+
+            with open(bucket_cfg_file, 'w') as outfile:
+                yaml.safe_dump(data,
+                               outfile,
+                               default_flow_style=None,
+                               sort_keys=False)
+
+        def csv_serializer(df, bucket_cfg_file):
+            csv_df = df[['phase', 'batch_size', 'seq_or_block']]
+            csv_df.to_csv(bucket_cfg_file, index=False)
 
         df = pd.DataFrame(
             self.seen_configs,
@@ -787,86 +848,61 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 ['is_prefill', 'batch_size', 'seq_or_block'], ascending=False)
         df['phase'] = df['is_prefill'].apply(lambda x: 'prefill'
                                              if x else 'decode')
-        data: Dict[str, Any] = {}  # type: ignore
-        #data['buckets'] = df.to_dict(orient='records')
-        buckets_dict = df.groupby('phase').apply(lambda dd: sorted(
-            list([list(a) for a in zip(dd['batch_size'], dd['seq_or_block'])]),
-            reverse=True)).to_dict()
-        prefill_df = df[df['is_prefill']]
-        decode_df = df[~df['is_prefill']]
+        if fmt == 'csv':
+            csv_serializer(df, bucket_cfg_file)
+        elif fmt in ['yaml', 'yml']:
+            yaml_serializer(df, bucket_cfg_file)
+        else:
+            raise NotImplementedError(f"Unsupported format: {fmt}")
 
-        updated_prompt_bs_bucket_cfg = self.prompt_bs_bucket_cfg
-        updated_prompt_bs_bucket_cfg[0] = int(prefill_df['batch_size'].min())
-        updated_prompt_bs_bucket_cfg[2] = int(prefill_df['batch_size'].max())
-        updated_prompt_seq_bucket_cfg = self.prompt_seq_bucket_cfg
-        updated_prompt_seq_bucket_cfg[0] = int(
-            prefill_df['seq_or_block'].min())
-        updated_prompt_seq_bucket_cfg[2] = int(
-            prefill_df['seq_or_block'].max())
-        updated_decode_bs_bucket_cfg = self.decode_bs_bucket_cfg
-        updated_decode_bs_bucket_cfg[0] = int(decode_df['batch_size'].min())
-        updated_decode_bs_bucket_cfg[2] = int(decode_df['batch_size'].max())
-        updated_decode_block_bucket_cfg = self.decode_block_bucket_cfg
-        updated_decode_block_bucket_cfg[0] = int(
-            decode_df['seq_or_block'].min())
-        updated_decode_block_bucket_cfg[2] = int(
-            decode_df['seq_or_block'].max())
-
-        data['bucket_cfg'] = {
-            'prompt_bs_bucket_cfg':
-            bucket_cfg_to_dict(updated_prompt_bs_bucket_cfg),
-            'prompt_seq_bucket_cfg':
-            bucket_cfg_to_dict(updated_prompt_seq_bucket_cfg),
-            'decode_bs_bucket_cfg':
-            bucket_cfg_to_dict(updated_decode_bs_bucket_cfg),
-            'decode_block_bucket_cfg':
-            bucket_cfg_to_dict(updated_decode_block_bucket_cfg),
-        }
-        data['buckets'] = buckets_dict
-
-        class PSS(str):
-            pass
-
-        csv_df = df[['phase', 'batch_size', 'seq_or_block']]
-        data['buckets_csv'] = PSS(csv_df.to_csv(index=False))
-
-        def pss_representer(dumper, data):
-            style = '|'
-            tag = u'tag:yaml.org,2002:str'
-            return dumper.represent_scalar(tag, data, style=style)
-
-        yaml.add_representer(PSS, pss_representer, Dumper=yaml.SafeDumper)
-        import pdb
-        pdb.set_trace()
-        with open(bucket_cfg_file, 'w') as outfile:
-            yaml.safe_dump(data,
-                           outfile,
-                           default_flow_style=None,
-                           sort_keys=False)
         msg = f"Bucket calibration settings saved to {bucket_cfg_file}"
         logger.info(msg)
 
-    def deserialize_bucket_settings(self, bucket_cfg_file):
-        import yaml
+    def deserialize_bucket_settings(
+        self,
+        bucket_cfg_file,
+        fmt='yaml'
+    ) -> Tuple[Optional[Dict[str, int]], Tuple[Optional[List[Tuple[
+            int, int]]], Optional[List[Tuple[int, int]]]]]:
         bucket_cfg = None
         prompt_buckets = None
         decode_buckets = None
-        try:
-            with open(bucket_cfg_file, 'r') as f:
-                data = yaml.safe_load(f)
-            # Load min,step,max from file
-            bucket_cfg = data['bucket_cfg']
-            # Load pre-generated buckets, if any
-            if 'buckets' in data:
-                prompt_buckets = data['buckets']['prefill']
-                prompt_buckets = [tuple(b) for b in prompt_buckets]
-                decode_buckets = data['buckets']['decode']
-                decode_buckets = [tuple(b) for b in decode_buckets]
-        except (FileNotFoundError, IOError, PermissionError):
-            msg = ("Could not open file specified in VLLM_HPU_BUCKET_CFG: "
-                   f"{bucket_cfg_file}. Falling back to default config.")
-            logger.error(msg)
-
+        # CSV does not support overriding bucket_cfg
+        if fmt == 'csv':
+            import csv
+            try:
+                with open(bucket_cfg_file, 'r') as f:
+                    reader = csv.DictReader(f, skipinitialspace=True)
+                    data = list(reader)
+                prompt_buckets = [(int(b['batch_size']),
+                                   int(b['seq_or_block'])) for b in data
+                                  if b['phase'] == 'prefill']
+                decode_buckets = [(int(b['batch_size']),
+                                   int(b['seq_or_block'])) for b in data
+                                  if b['phase'] == 'decode']
+            except (FileNotFoundError, IOError, PermissionError):
+                msg = ("Could not open file specified in VLLM_HPU_BUCKET_CFG: "
+                       f"{bucket_cfg_file}. Falling back to default config.")
+                logger.error(msg)
+        elif fmt in ['yaml', 'yml']:
+            try:
+                import yaml
+                with open(bucket_cfg_file, 'r') as f:
+                    data = yaml.safe_load(f)
+                # Load min,step,max from file
+                bucket_cfg = data['bucket_cfg']
+                # Load pre-generated buckets, if any
+                if 'buckets' in data:
+                    prompt_buckets = data['buckets']['prefill']
+                    prompt_buckets = [tuple(b) for b in prompt_buckets]
+                    decode_buckets = data['buckets']['decode']
+                    decode_buckets = [tuple(b) for b in decode_buckets]
+            except (FileNotFoundError, IOError, PermissionError):
+                msg = ("Could not open file specified in VLLM_HPU_BUCKET_CFG: "
+                       f"{bucket_cfg_file}. Falling back to default config.")
+                logger.error(msg)
+        else:
+            raise NotImplementedError(f"Unsupported format: {fmt}")
         return bucket_cfg, (prompt_buckets, decode_buckets)
 
     def _prepare_prompt(
@@ -2133,5 +2169,6 @@ class HabanaModelRunner(
 
     def __del__(self):
         if getattr(self, 'calibrate_buckets', False):
-            self.serialize_bucket_settings(self.bucket_cfg_file)
+            self.serialize_bucket_settings(self.bucket_cfg_file,
+                                           self.bucket_cfg_file_format)
         self.shutdown_inc()
