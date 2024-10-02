@@ -100,6 +100,59 @@ class SchedulingBudget:
     def num_curr_seqs(self):
         return self._num_curr_seqs
 
+@dataclass
+class PaddingAwareSchedulingBudget(SchedulingBudget):
+    _request_ids_max_curr_seq_len: Dict[str, int] = field(default_factory=dict)
+    
+    def _padding_fn(self, batch_size, max_seq_len):
+        def next_pow2(value: int, base: int):
+            res = base
+            while value > 1:
+                value = (value + 1) // 2
+                res *= 2
+            return res
+
+
+        def round_up(value: int, k: int):
+            return (value + k - 1) // k * k
+
+        def find_bucket(value: int, config: Tuple[int, int, int]):
+            bmin, bstep, _ = config
+            next_step = round_up(value, bstep)
+            next_pow = next_pow2(value, bmin)
+            return max(bmin, min(next_step, next_pow))
+        
+        bs_cfg = [1, 32, 64]
+        seq_cfg = [128, 128, 1024]
+
+        return find_bucket(batch_size, bs_cfg) * find_bucket(max_seq_len, seq_cfg)
+    
+    def add_prefill(self, req_id: str, max_seq_len: int):
+        if req_id in self._request_ids_max_curr_seq_len:
+            return
+        self._request_ids_max_curr_seq_len[req_id] = max_seq_len
+
+    def subtract_prefill(self, req_id: str):
+        if req_id in self._request_ids_max_curr_seq_len:
+            del self._request_ids_max_curr_seq_len[req_id] 
+
+    def can_schedule(self, *args, num_new_tokens: int, num_new_seqs: int, max_seq_len: Optional[int]):
+        can_parent_schedule = super().can_schedule(*args, num_new_tokens=num_new_tokens, num_new_seqs=num_new_seqs)
+        prefill_bs = len(self._request_ids_max_curr_seq_len)
+        if not can_parent_schedule or max_seq_len is None:
+            print(f'prefill bs={prefill_bs}, overall bs={self._num_curr_seqs}')
+            return can_parent_schedule
+
+        max_seq_len = 0 if max_seq_len is None else max_seq_len
+        current_max_seq_lens = self._request_ids_max_curr_seq_len.values() if len(self._request_ids_max_curr_seq_len.values()) > 0 else [0]
+        max_curr_seq_len = max([*current_max_seq_lens, max_seq_len])
+        prefill_bs = len(self._request_ids_max_curr_seq_len)
+        padded_tokens = self._padding_fn(prefill_bs + num_new_seqs, max_curr_seq_len) 
+        can_fit_padding = padded_tokens <= self.token_budget
+        if not can_fit_padding:
+            print(f'prefill seq rejected due to padding: bs={self._num_curr_seqs + num_new_seqs}, curr_max_seq={max(current_max_seq_lens)}, new_max_seq={max_seq_len}, token_budget={self.token_budget}, padded_tokens={padded_tokens}')
+        return can_parent_schedule and can_fit_padding
+
 
 @dataclass
 class ScheduledSequenceGroup:
@@ -937,9 +990,16 @@ class Scheduler:
                     continue
 
             num_new_seqs = seq_group.get_max_num_running_seqs()
+            max_seq_len = None
+            can_schedule_kwargs = {'num_new_tokens': num_new_tokens,
+                                    'num_new_seqs': num_new_seqs
+                                    }
+            if isinstance(budget, PaddingAwareSchedulingBudget):
+                max_seq_len = self._get_max_seq_len(seq_group, SequenceStatus.WAITING)
+                can_schedule_kwargs['max_seq_len'] = max_seq_len
+            
             if (num_new_tokens == 0
-                    or not budget.can_schedule(num_new_tokens=num_new_tokens,
-                                               num_new_seqs=num_new_seqs)):
+                    or not budget.can_schedule(**can_schedule_kwargs)):
                 break
 
             # Can schedule this request.
@@ -970,6 +1030,8 @@ class Scheduler:
                                        token_chunk_size=num_new_tokens))
             budget.add_num_batched_tokens(seq_group.request_id, num_new_tokens)
             budget.add_num_seqs(seq_group.request_id, num_new_seqs)
+            if isinstance(budget, PaddingAwareSchedulingBudget):
+                budget.add_prefill(seq_group.request_id, max_seq_len)
 
         # Queue requests that couldn't be scheduled.
         waiting_queue.extendleft(leftover_waiting_sequences)
@@ -991,7 +1053,7 @@ class Scheduler:
         be swapped or preempted.
         """
         # Include running requests to the budget.
-        budget = SchedulingBudget(
+        budget = PaddingAwareSchedulingBudget(
             token_budget=self.scheduler_config.max_num_batched_tokens,
             max_num_seqs=self.scheduler_config.max_num_seqs,
         )
@@ -1636,3 +1698,7 @@ class Scheduler:
             else:
                 num_new_tokens = min(num_new_tokens, remaining_token_budget)
         return num_new_tokens
+
+    def _get_max_seq_len(self, seq_group: SequenceGroup, status: SequenceStatus):
+        seqs = seq_group.get_seqs(status=status)
+        return max([seq.get_num_new_tokens() for seq in seqs])
