@@ -33,7 +33,7 @@ def run_llava_next(question, modality):
     assert modality == "image"
 
     prompt = f"[INST] <image>\n{question} [/INST]"
-    llm = LLM(model="llava-hf/llava-v1.6-mistral-7b-hf", max_model_len=8192)
+    llm = LLM(model="llava-hf/llava-v1.6-mistral-7b-hf", max_model_len=8192, max_num_seqs=4)
     stop_token_ids = None
     return llm, prompt, stop_token_ids
 

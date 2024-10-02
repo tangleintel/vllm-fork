@@ -29,6 +29,8 @@ from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
                          ModelConfig, ObservabilityConfig, ParallelConfig,
                          PromptAdapterConfig, SchedulerConfig)
 from vllm.distributed.parallel_state import get_world_group
+from vllm.inputs import INPUT_REGISTRY
+from vllm.inputs.registry import InputRegistry
 from vllm.logger import init_logger
 from vllm.lora.layers import LoRAMapping
 from vllm.lora.request import LoRARequest
@@ -38,6 +40,7 @@ from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.model_executor.model_loader import get_model
 from vllm.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
                              MultiModalInputs)
+from vllm.multimodal.registry import MultiModalRegistry
 from vllm.sampling_params import SamplingParams
 from vllm.sequence import (IntermediateTensors, SequenceData,
                            SequenceGroupMetadata)
@@ -516,6 +519,8 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         prompt_adapter_config: Optional[PromptAdapterConfig] = None,
         return_hidden_states: bool = False,
         observability_config: Optional[ObservabilityConfig] = None,
+        input_registry: InputRegistry = INPUT_REGISTRY,
+        mm_registry: MultiModalRegistry = MULTIMODAL_REGISTRY,
     ):
         self.model_config = model_config
         self.parallel_config = parallel_config
@@ -563,6 +568,13 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.model: torch.nn.Module = None
         self.inc_initialized_successfully = False
 
+        # Multi-modal data support
+        self.input_registry = input_registry
+        self.mm_registry = mm_registry
+        self.multi_modal_input_mapper = mm_registry \
+            .create_input_mapper(model_config)
+        self.mm_registry.init_mm_limits_per_prompt(self.model_config)
+
         # Profiler stats
         self.profiler_counter_helper = HabanaProfilerCounterHelper()
         self.seen_configs: set = set()
@@ -588,10 +600,6 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 t * gc_thr_multiplier for t in default_gc_thrs
             ]
         gc.set_threshold(*requested_gc_thrs)
-
-        # Multi-modal data support
-        self.multi_modal_input_mapper = MULTIMODAL_REGISTRY \
-            .create_input_mapper(self.model_config)
 
         self.skip_warmup = os.environ.get('VLLM_SKIP_WARMUP',
                                           'false').lower() == 'true'
@@ -1324,6 +1332,20 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         max_batch_size = self.prompt_bs_bucket_cfg[-1]
         max_seq_len = min(self.prompt_seq_bucket_cfg[-1],
                           self.max_num_batched_tokens // max_batch_size)
+        max_mm_tokens = self.mm_registry.get_max_multimodal_tokens(
+            self.model_config)
+        if max_mm_tokens > 0:
+            max_num_seqs_orig = max_num_seqs
+            max_num_seqs = min(max_num_seqs,
+                               max_num_batched_tokens // max_mm_tokens)
+            if max_num_seqs < 1:
+                expr = (f"min({max_num_seqs_orig}, "
+                        f"{max_num_batched_tokens} // {max_mm_tokens})")
+                logger.warning(
+                    "Computed max_num_seqs (%s) to be less than 1. "
+                    "Setting it to the minimum value of 1.", expr)
+                max_num_seqs = 1
+
 
         self.warmup_scenario(max_batch_size, max_seq_len, True, kv_caches,
                              False, True)
