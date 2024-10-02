@@ -991,7 +991,8 @@ class SchedulerConfig:
                  num_scheduler_steps: int = 1,
                  multi_step_stream_outputs: bool = False,
                  send_delta_data: bool = False,
-                 policy: str = "fcfs") -> None:
+                 policy: str = "fcfs",
+                 padding_aware_scheduling: bool = False) -> None:
         if max_num_batched_tokens is None:
             if enable_chunked_prefill:
                 if num_scheduler_steps > 1:
@@ -1041,6 +1042,7 @@ class SchedulerConfig:
         self.multi_step_stream_outputs = multi_step_stream_outputs
         self.send_delta_data = send_delta_data
         self.policy = policy
+        self.padding_aware_scheduling = padding_aware_scheduling
         self._verify_args()
 
     def _verify_args(self) -> None:
@@ -1071,6 +1073,9 @@ class SchedulerConfig:
                 "num_scheduler_steps "
                 f"({self.num_scheduler_steps}) must be greater than or "
                 "equal to 1.")
+        if self.padding_aware_scheduling and self.chunked_prefill_enabled:
+            raise ValueError("Padding-aware scheduling does"
+                             "not support chunked prefill.")
 
     @property
     def is_multi_step(self) -> bool:
