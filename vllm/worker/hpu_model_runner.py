@@ -39,8 +39,9 @@ from vllm.model_executor.model_loader import get_model
 from vllm.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
                              MultiModalInputs)
 from vllm.sampling_params import SamplingParams
-from vllm.sequence import (IntermediateTensors, SequenceData,
-                           SequenceGroupMetadata)
+from vllm.sequence import (IntermediateTensors, SequenceData, SequenceOutput,
+                           CompletionSequenceGroupOutput,
+                           SequenceGroupMetadata, Logprob)
 from vllm.utils import (is_fake_hpu, is_pin_memory_available,
                         make_tensor_with_pad)
 from vllm.worker.model_runner_base import (
@@ -423,6 +424,8 @@ class ModelInputForHPU(ModelRunnerInputBase):
     virtual_engine: int = 0
     lora_ids: Optional[List[int]] = None
     async_callback: Optional[Callable] = None
+    is_first_multi_step: bool = True
+    is_last_step: bool = True
 
     def as_broadcastable_tensor_dict(self) -> Dict[str, Any]:
         tensor_dict = {
@@ -435,6 +438,8 @@ class ModelInputForHPU(ModelRunnerInputBase):
             "batch_size_padded": self.batch_size_padded,
             "virtual_engine": self.virtual_engine,
             "lora_ids": self.lora_ids,
+            "is_first_multi_step": self.is_first_multi_step,
+            "is_last_step": self.is_last_step,
         }
         _add_attn_metadata_broadcastable_dict(tensor_dict, self.attn_metadata)
         return tensor_dict
@@ -562,6 +567,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self._mem_margin: Optional[int] = None
         self._setup_buckets()
         self._set_gc_threshold()
+
+        # For multi-step scheduling
+        self.cached_step_outputs: List[torch.Tensor] = []
 
     def _set_gc_threshold(self) -> None:
         # Read https://docs.python.org/3/library/gc.html#gc.set_threshold
@@ -1858,16 +1866,16 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         intermediate_tensors: Optional[IntermediateTensors] = None,
         num_steps: int = 1,
         warmup_mode=False,
+        seq_group_metadata_list=None,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
-        if num_steps > 1:
-            raise ValueError(
-                "num_steps > 1 is not supported in HPUModelRunner")
-
+        ########### LORA ###########
         if self.lora_config:
             assert model_input.lora_requests is not None
             assert model_input.lora_mapping is not None
             self.set_active_loras(model_input.lora_requests,
                                   model_input.lora_mapping)
+        ########### /LORA ###########
+        ########### INICJALIZACJA I ASSERTY ###########
         input_tokens = model_input.input_tokens
         input_positions = model_input.input_positions
         attn_metadata = model_input.attn_metadata
@@ -1901,6 +1909,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             "lora_mask": lora_mask,
             **(model_input.multi_modal_kwargs or {}),
         }
+        ########## /INICJALIZACJA I ASSERTY ###########
+        ########## nic ciekawego ###########
         if htorch.utils.internal.is_lazy():
             execute_model_kwargs.update({"bypass_hpu_graphs": not use_graphs})
 
@@ -1913,47 +1923,92 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 f"graphs{'T' if use_graphs else 'F'}")
         else:
             model_event_name = 'model_executable'
-        with self.profiler.record_event('internal', model_event_name):
-            hidden_states = self.model.forward(
-                **execute_model_kwargs,
-                selected_token_indices=sampling_metadata.selected_token_indices
-            )
+        ########## /nic ciekawego ###########
+        # make sure we skip the sampler on the lask rank and only pythonize
+        # if CPU is ahead.
+        if num_steps > 1:
+            sampling_metadata.skip_sampler_cpu_output = True
+            self.model.model.sampler.include_gpu_probs_tensor = True
+        if model_input.is_first_multi_step:
+            for i in range(num_steps):
+                import pdb; pdb.set_trace()
+                ########## model.forward ##########
+                with self.profiler.record_event('internal', model_event_name):
+                    hidden_states = self.model.forward(
+                        **execute_model_kwargs,
+                        selected_token_indices=sampling_metadata.selected_token_indices
+                    )
+                ########## /model.forward ##########
 
-        if self.lora_config:
-            LoraMask.setLoraMask(
-                lora_logits_mask.index_select(
-                    0, sampling_metadata.selected_token_indices))
+                ########### LORA ###########
+                if self.lora_config:
+                    LoraMask.setLoraMask(
+                        lora_logits_mask.index_select(
+                            0, sampling_metadata.selected_token_indices))
+                ########### /LORA ###########
 
-        # Compute the logits.
-        with self.profiler.record_event(
-                'internal', ('compute_logits_'
-                             f'{"prompt" if is_prompt else "decode"}_bs'
-                             f'{batch_size}_'
-                             f'seq{seq_len}')):
-            sampling_metadata.selected_token_indices = None
-            logits = self.model.compute_logits(hidden_states,
-                                               sampling_metadata)
-        htorch.core.mark_step()
-        # Only perform sampling in the driver worker.
-        if not self.is_driver_worker:
+                ########### OBLICZANIE LOGITSÓW ###########
+                # Compute the logits.
+                with self.profiler.record_event(
+                        'internal', ('compute_logits_'
+                                    f'{"prompt" if is_prompt else "decode"}_bs'
+                                    f'{batch_size}_'
+                                    f'seq{seq_len}')):
+                    # TODO: możliwe, że taki warunek nie ma sensu i trzeba to lepiej zrozumieć
+                    if num_steps == 1:
+                        sampling_metadata.selected_token_indices = None
+                    logits = self.model.compute_logits(hidden_states,
+                                                    sampling_metadata)
+                htorch.core.mark_step()
+                ########### /OBLICZANIE LOGITSÓW ###########
+                ########## nic ciekawego ###########
+                # Only perform sampling in the driver worker.
+                if not self.is_driver_worker:
+                    return []
+
+                # if model_input.async_callback is not None and num_steps == 1:
+                #     model_input.async_callback()
+                ########## /nic ciekawego ###########
+                ########## SAMPLING ###########
+                # Sample the next token.
+                with self.profiler.record_event(
+                        'internal', ('sample_'
+                                    f'{"prompt" if is_prompt else "decode"}_'
+                                    f'bs{batch_size}_'
+                                    f'seq{seq_len}')):
+                    output = self.model.sample(
+                        logits=logits,
+                        sampling_metadata=sampling_metadata,
+                    )
+                    if num_steps > 1:
+                        output = output.sampled_token_ids
+                        self.cached_step_outputs.append(output)
+                htorch.core.mark_step()
+                ########## /SAMPLING ###########
+                if i < num_steps - 1:
+                    # Prepare the inputs for the next step.
+                    # Co tu wymaga update'u?
+                    # zmienia się execute_model_kwargs['attn_metadata'].block_usage
+                    # input_ids
+                    # positions
+                    # kv_caches
+                    # attn_metadata
+                    # intermediate_tensors
+                    # lora_mask
+                    # bypass_hpu_graphs
+                    # execute_model_kwargs["attn_metadata"].slot_mapping
+                    # result = self._prepare_decode(seq_group_metadata_list)
+                    execute_model_kwargs.update({"input_ids": output,
+                                                 "positions": execute_model_kwargs['positions'] + 1},)
+                                                #  "attn_metadata": )
+                elif num_steps > 1:  # last step
+                    output = self._decode_sampler_outputs(model_input)
+
+
+        else:
+            print("not first multistep")
             return []
-
-        if model_input.async_callback is not None:
-            model_input.async_callback()
-
-        # Sample the next token.
-        with self.profiler.record_event(
-                'internal', ('sample_'
-                             f'{"prompt" if is_prompt else "decode"}_'
-                             f'bs{batch_size}_'
-                             f'seq{seq_len}')):
-            output = self.model.sample(
-                logits=logits,
-                sampling_metadata=sampling_metadata,
-            )
-        output.outputs = output.outputs[:real_batch_size]
-        htorch.core.mark_step()
-
+        ########## PROFILER ###########
         if self.is_driver_worker and self.profiler.enabled:
             # Stop recording 'execute_model' event
             self.profiler.end()
@@ -1966,7 +2021,57 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 real_batch_size=real_batch_size,
                 is_prompt=is_prompt)
             self.profiler.record_counter(self.event_start, counters)
-        return [output]
+        ########## /PROFILER ###########
+        return output if type(output) is list else [output]
+
+    def _decode_sampler_outputs(self, model_input):
+        use_async_out_proc = model_input.async_callback is not None
+        sampler_outputs = []
+        num_outputs = len(self.cached_step_outputs)
+        for i in range(num_outputs):
+            next_token_ids = self.cached_step_outputs.pop(0)
+            next_token_ids = next_token_ids.cpu().tolist()
+            sampler_output = self._make_decode_output(next_token_ids,
+                                                      model_input.sampling_metadata.seq_groups)
+            sampler_outputs.append(sampler_output)
+            if i < num_outputs - 1 and use_async_out_proc:
+                assert model_input.async_callback is not None
+                ctx = model_input.async_callback.keywords[  # type: ignore
+                    "ctx"]
+                ctx.append_output(
+                    outputs=[sampler_output],
+                    seq_group_metadata_list=ctx.seq_group_metadata_list,
+                    scheduler_outputs=ctx.scheduler_outputs,
+                    is_async=False,
+                    is_last_step=False,
+                    is_first_step_output=i == 0)
+                model_input.async_callback()
+        
+        if use_async_out_proc:
+            return [sampler_outputs[-1]]
+        else:
+            return sampler_outputs
+
+    def _make_decode_output(
+        self,
+        next_token_ids: List[List[int]],
+        seq_groups: List[List[int]],
+    ) -> SamplerOutput:
+        zero_logprob = Logprob(0.0)
+        sampler_outputs = []
+        batch_idx = 0
+        for seq_group in seq_groups:
+            seq_ids = seq_group.seq_ids
+            seq_outputs = []
+            for seq_id in seq_ids:
+                next_token_id = next_token_ids[batch_idx][0]
+                seq_outputs.append(
+                    SequenceOutput(seq_id, next_token_id,
+                                {next_token_id: zero_logprob}))
+                batch_idx += 1
+            sampler_outputs.append(CompletionSequenceGroupOutput(
+                seq_outputs, None))
+        return SamplerOutput(sampler_outputs)
 
     def shutdown_inc(self):
         can_finalize_inc = False
