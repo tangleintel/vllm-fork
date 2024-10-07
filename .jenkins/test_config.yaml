@@ -1,11 +1,14 @@
 # test_config.yaml
 steps:
-  - name: lm_eval_gsm8k_llama3_1_8b_g1
+  - name: lm_eval_gsm8k_small_g1_tp1
     flavor: g1
-    command: lm_eval --model vllm --model_args pretrained=/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct/,dtype=bfloat16,max_num_seqs=128 --tasks gsm8k_cot_llama --fewshot_as_multiturn --apply_chat_template --batch_size auto
-  - name: lm_eval_gsm8k_llama3_1_8b_g2
+    command: cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-small.txt -t 1
+  - name: lm_eval_gsm8k_small_g1_tp2
+    flavor: g1.s
+    command: cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-small.txt -t 2
+  - name: lm_eval_gsm8k_small_g2_tp1
     flavor: g2
-    command: lm_eval --model vllm --model_args pretrained=/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct/,dtype=bfloat16,max_num_seqs=128 --tasks gsm8k_cot_llama --fewshot_as_multiturn --apply_chat_template --batch_size auto
-  - name: lm_eval_gsm8k_llama3_1_8b_g3
-    flavor: g3
-    command: lm_eval --model vllm --model_args pretrained=/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct/,dtype=bfloat16,max_num_seqs=128 --tasks gsm8k_cot_llama --fewshot_as_multiturn --apply_chat_template --batch_size auto
+    command: cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-small.txt -t 1
+  - name: lm_eval_gsm8k_small_g2_tp2
+    flavor: g2.s
+    command: cd .jenkins/lm-eval-harness && bash run-tests.sh -c configs/models-small.txt -t 2
