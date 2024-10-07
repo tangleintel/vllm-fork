@@ -17,11 +17,14 @@ import yaml
 RTOL = 0.05
 TEST_DATA_FILE = os.environ.get(
     "LM_EVAL_TEST_DATA_FILE",
-    ".buildkite/lm-eval-harness/configs/Meta-Llama-3-8B-Instruct.yaml")
+    ".jenkins/lm-eval-harness/configs/Meta-Llama-3-8B-Instruct.yaml")
 
 TP_SIZE = os.environ.get("LM_EVAL_TP_SIZE", 1)
 
-
+import atexit
+def fail_on_exit():
+    os._exit(1)
+    
 def launch_lm_eval(eval_config):
     trust_remote_code = eval_config.get('trust_remote_code', False)
     dtype = 'bfloat16' if 'dtype' not in eval_config else eval_config["dtype"]
@@ -58,4 +61,8 @@ def test_lm_eval_correctness():
             measured_value = results["results"][task["name"]][metric["name"]]
             print(f'{task["name"]} | {metric["name"]}: '
                   f'ground_truth={ground_truth} | measured={measured_value}')
-            assert numpy.isclose(ground_truth, measured_value, rtol=RTOL)
+            try:
+                assert numpy.isclose(ground_truth, measured_value, rtol=RTOL)
+            except AssertionError as exc:
+                atexit.register(fail_on_exit) # nasty workaround for something that's likely a Synapse bug
+                raise exc
