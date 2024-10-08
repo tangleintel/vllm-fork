@@ -22,9 +22,6 @@ while getopts "c:t:j:" OPT; do
     t )
         TP_SIZE="$OPTARG"
         ;;
-    j )
-        JUNITXML="$OPTARG"
-        ;;
     \? )
         usage
         exit 1
@@ -46,11 +43,14 @@ do
     export PT_HPU_ENABLE_LAZY_COLLECTIVES=true
     export VLLM_SKIP_WARMUP=true
     RANDOM_SUFFIX=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 4; echo)
-    LOG_BASENAME=$(basename $JUNITXML .xml)
-    LOG_DIR=$(dirname $JUNITXML)
-    LOG_FILENAME="${LOG_BASENAME}_${MODEL_CONFIG}_${RANDOM_SUFFIX}.xml"
-    LOG_PATH="${LOG_DIR}/${LOG_FILENAME}"
-    pytest --pdb -s test_lm_eval_correctness.py --junitxml=$LOG_PATH || LOCAL_SUCCESS=$?
+    JUNIT_SUFFIX=""
+    if [[ -n "$TEST_RESULTS_DIR" ]]; then
+        LOG_DIR=$TEST_RESULTS_DIR
+        LOG_FILENAME="$test_${MODEL_CONFIG}_${RANDOM_SUFFIX}.xml"
+        LOG_PATH="${LOG_DIR}/${LOG_FILENAME}"
+        JUNIT_SUFFIX="--junitxml=${LOG_PATH}"
+    fi
+    pytest -s test_lm_eval_correctness.py $JUNIT_SUFFIX || LOCAL_SUCCESS=$?
 
     if [[ $LOCAL_SUCCESS == 0 ]]; then
         echo "=== PASSED MODEL: ${MODEL_CONFIG} ==="
