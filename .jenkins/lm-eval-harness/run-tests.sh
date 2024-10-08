@@ -42,7 +42,7 @@ do
     export LM_EVAL_TP_SIZE=$TP_SIZE
     export PT_HPU_ENABLE_LAZY_COLLECTIVES=true
     export VLLM_SKIP_WARMUP=true
-    pytest -s test_lm_eval_correctness.py || LOCAL_SUCCESS=$?
+    pytest --pdb -s test_lm_eval_correctness.py || LOCAL_SUCCESS=$?
 
     if [[ $LOCAL_SUCCESS == 0 ]]; then
         echo "=== PASSED MODEL: ${MODEL_CONFIG} ==="
