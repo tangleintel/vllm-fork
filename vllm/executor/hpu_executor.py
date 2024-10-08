@@ -6,8 +6,6 @@ import contextlib
 import os
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from vllm_hpu_extension.profiler import HabanaMemoryProfiler
-
 from vllm.executor.executor_base import ExecutorAsyncBase, ExecutorBase
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
@@ -21,7 +19,7 @@ from vllm.worker.worker_base import WorkerWrapperBase
 logger = init_logger(__name__)
 
 
-class HabanaExecutor(ExecutorBase):
+class HPUExecutor(ExecutorBase):
 
     uses_ray: bool = False
 
@@ -57,8 +55,8 @@ class HabanaExecutor(ExecutorBase):
                        rank: int = 0,
                        distributed_init_method: Optional[str] = None):
         wrapper = WorkerWrapperBase(
-            worker_module_name="vllm.worker.habana_worker",
-            worker_class_name="HabanaWorker",
+            worker_module_name="vllm.worker.hpu_worker",
+            worker_class_name="HPUWorker",
         )
         wrapper.init_worker(**self._get_worker_kwargs(local_rank, rank,
                                                       distributed_init_method))
@@ -86,7 +84,7 @@ class HabanaExecutor(ExecutorBase):
         # remains to abstract away the device for non-GPU configurations.
         logger.info("# HPU blocks: %d, # CPU blocks: %d", num_gpu_blocks,
                     num_cpu_blocks)
-
+        from vllm_hpu_extension.profiler import HabanaMemoryProfiler
         with HabanaMemoryProfiler() as cache_init_m:
             self.driver_worker.initialize_cache(num_gpu_blocks, num_cpu_blocks)
         msg = f"init_cache_engine took {cache_init_m.get_summary_string()}"
@@ -192,14 +190,17 @@ class HabanaExecutor(ExecutorBase):
         # it's running.
         return
 
+    def start_profile(self) -> None:
+        self.driver_worker.start_profile()
+
+    def stop_profile(self) -> None:
+        self.driver_worker.stop_profile()
+
     def shutdown(self) -> None:
         self.driver_worker.shutdown_inc()
 
-    def __del__(self):
-        self.shutdown()
 
-
-class HabanaExecutorAsync(HabanaExecutor, ExecutorAsyncBase):
+class HPUExecutorAsync(HPUExecutor, ExecutorAsyncBase):
 
     async def execute_model_async(
         self,
