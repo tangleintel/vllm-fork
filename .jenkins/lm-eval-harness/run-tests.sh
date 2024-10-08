@@ -14,13 +14,16 @@ usage() {
 
 SUCCESS=0
 
-while getopts "c:t:" OPT; do
+while getopts "c:t:j:" OPT; do
   case ${OPT} in
     c ) 
         CONFIG="$OPTARG"
         ;;
     t )
         TP_SIZE="$OPTARG"
+        ;;
+    j )
+        JUNITXML="$OPTARG"
         ;;
     \? )
         usage
@@ -42,7 +45,12 @@ do
     export LM_EVAL_TP_SIZE=$TP_SIZE
     export PT_HPU_ENABLE_LAZY_COLLECTIVES=true
     export VLLM_SKIP_WARMUP=true
-    pytest --pdb -s test_lm_eval_correctness.py || LOCAL_SUCCESS=$?
+    RANDOM_SUFFIX=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 4; echo)
+    LOG_BASENAME=$(basename $JUNITXML .xml)
+    LOG_DIR=$(dirname $JUNITXML)
+    LOG_FILENAME="${LOG_BASENAME}_${MODEL_CONFIG}_${RANDOM_SUFFIX}.xml"
+    LOG_PATH="${LOG_DIR}/${LOG_FILENAME}"
+    pytest --pdb -s test_lm_eval_correctness.py --junitxml=$LOG_PATH || LOCAL_SUCCESS=$?
 
     if [[ $LOCAL_SUCCESS == 0 ]]; then
         echo "=== PASSED MODEL: ${MODEL_CONFIG} ==="
