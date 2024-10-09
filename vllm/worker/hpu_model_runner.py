@@ -1005,7 +1005,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                      dtype=torch.int,
                                      device=self.device)
         block_usage = torch.tensor(block_usage,
-                                   dtype=torch.bfloat16,
+                                   dtype=self.model_config.dtype,
                                    device=self.device)
 
         slot_mapping = torch.tensor(slot_mapping,
@@ -1014,7 +1014,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         block_indices, block_offsets = precompute_indices_and_offsets(
             self.block_size, slot_mapping, False)
-        block_scales = torch.tensor(block_scales, dtype=torch.bfloat16, device=self.device)
+        block_scales = torch.tensor(block_scales,
+                                    dtype=self.model_config.dtype,
+                                    device=self.device)
 
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=False,
