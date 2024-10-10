@@ -2072,9 +2072,34 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     # bypass_hpu_graphs
                     # execute_model_kwargs["attn_metadata"].slot_mapping
                     # result = self._prepare_decode(seq_group_metadata_list)
-                    execute_model_kwargs.update({"input_ids": output,
-                                                 "positions": execute_model_kwargs['positions'] + 1},)
-                                                 #  "attn_metadata": )
+                    ###############################################################################
+                    # positions = execute_model_kwargs['positions'] + 1
+                    # block_list = execute_model_kwargs['attn_metadata'].block_list
+                    # block_number = block_list.gather(
+                    #     1,
+                    #     positions.long() // self.block_size)
+                    # block_offset = positions % self.block_size
+                    # is_padding = slot_mapping == _PAD_SLOT_ID
+                    # slot_mapping = block_number * self.block_size + block_offset
+                    # slot_mapping = slot_mapping.long()
+                    # slot_mapping = torch.where(is_padding, _PAD_SLOT_ID,
+                    #                            slot_mapping)
+
+                    # execute_model_kwargs.update({"input_ids": output,
+                    #                              "positions": positions})
+                    # execute_model_kwargs['attn_metadata'].slot_mapping = slot_mapping
+                    # execute_model_kwargs['attn_metadata'].block_offsets = positions % self.block_size
+                    #                              #  "attn_metadata": )
+                    ###############################################################################
+                    import pdb; pdb.set_trace()
+
+                    result = self._prepare_decode(seq_group_metadata_list)
+                    execute_model_kwargs.update({"input_ids": result.input_tokens,
+                                                 "positions": result.input_positions,
+                                                 "attn_metadata": result.attn_metadata})
+                    result.input_tokens
+                    result.input_positions
+                    result.attn_metadata
                 if model_input.async_callback is not None:
                     model_input.async_callback()
             if num_steps == 1:
