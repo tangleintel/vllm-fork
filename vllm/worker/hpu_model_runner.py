@@ -1929,70 +1929,83 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         warmup_mode=False,
         seq_group_metadata_list=None,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
-        ########### LORA ###########
-        if self.lora_config:
-            assert model_input.lora_requests is not None
-            assert model_input.lora_mapping is not None
-            self.set_active_loras(model_input.lora_requests,
-                                  model_input.lora_mapping)
-        ########### /LORA ###########
-        ########### INICJALIZACJA I ASSERTY ###########
-        input_tokens = model_input.input_tokens
-        input_positions = model_input.input_positions
-        attn_metadata = model_input.attn_metadata
-        sampling_metadata = model_input.sampling_metadata
-        real_batch_size = model_input.real_batch_size
-        batch_size_padded = model_input.batch_size_padded
-        assert input_tokens is not None
-        assert input_positions is not None
-        assert sampling_metadata is not None
-        assert attn_metadata is not None
-        is_prompt = attn_metadata.is_prompt
-        assert is_prompt is not None
-        batch_size = input_tokens.size(0)
-        seq_len = self._seq_len(attn_metadata)
-        use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
-        self._check_config(batch_size, seq_len, is_prompt, warmup_mode)
-
-        lora_mask: torch.Tensor = None
-        lora_logits_mask: torch.Tensor = None
-        if self.lora_config:
-            assert model_input.lora_ids is not None
-            lora_mask, lora_logits_mask = self.create_lora_mask(
-                input_tokens, model_input.lora_ids, attn_metadata.is_prompt)
-
-        execute_model_kwargs = {
-            "input_ids": input_tokens,
-            "positions": input_positions,
-            "kv_caches": kv_caches,
-            "attn_metadata": self.trim_attn_metadata(attn_metadata),
-            "intermediate_tensors": intermediate_tensors,
-            "lora_mask": lora_mask,
-            **(model_input.multi_modal_kwargs or {}),
-        }
-        ########## /INICJALIZACJA I ASSERTY ###########
-        ########## nic ciekawego ###########
-        if htorch.utils.internal.is_lazy():
-            execute_model_kwargs.update({"bypass_hpu_graphs": not use_graphs})
-
-        htorch.core.mark_step()
-        if self.is_driver_worker:
-            model_event_name = ("model_"
-                                f"{'prompt' if is_prompt else 'decode'}_"
-                                f"bs{batch_size}_"
-                                f"seq{seq_len}_"
-                                f"graphs{'T' if use_graphs else 'F'}")
-        else:
-            model_event_name = 'model_executable'
-        ########## /nic ciekawego ###########
-        # make sure we skip the sampler on the lask rank and only pythonize
-        # if CPU is ahead.
-        if num_steps > 1:
-            sampling_metadata.skip_sampler_cpu_output = True
-            self.model.model.sampler.include_gpu_probs_tensor = True
+        if not model_input.is_first_multi_step:
+            if not model_input.is_last_step:
+                print("not first or last multistep")
+                return []
+            print("last step")
+            output = self._decode_sampler_outputs(model_input)
         if model_input.is_first_multi_step:
+            ########### LORA ###########
+            print("first step")
+            if self.lora_config:
+                assert model_input.lora_requests is not None
+                assert model_input.lora_mapping is not None
+                self.set_active_loras(model_input.lora_requests,
+                                    model_input.lora_mapping)
+            ########### /LORA ###########
+            ########### INICJALIZACJA I ASSERTY ###########
+            input_tokens = model_input.input_tokens
+            input_positions = model_input.input_positions
+            attn_metadata = model_input.attn_metadata
+            sampling_metadata = model_input.sampling_metadata
+            real_batch_size = model_input.real_batch_size
+            batch_size_padded = model_input.batch_size_padded
+            assert input_tokens is not None
+            assert input_positions is not None
+            assert sampling_metadata is not None
+            assert attn_metadata is not None
+            is_prompt = attn_metadata.is_prompt
+            assert is_prompt is not None
+            batch_size = input_tokens.size(0)
+            seq_len = self._seq_len(attn_metadata)
+            use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
+            self._check_config(batch_size, seq_len, is_prompt, warmup_mode)
+
+            lora_mask: torch.Tensor = None
+            lora_logits_mask: torch.Tensor = None
+            if self.lora_config:
+                assert model_input.lora_ids is not None
+                lora_mask, lora_logits_mask = self.create_lora_mask(
+                    input_tokens, model_input.lora_ids, attn_metadata.is_prompt)
+
+            execute_model_kwargs = {
+                "input_ids": input_tokens,
+                "positions": input_positions,
+                "kv_caches": kv_caches,
+                "attn_metadata": self.trim_attn_metadata(attn_metadata),
+                "intermediate_tensors": intermediate_tensors,
+                "lora_mask": lora_mask,
+                **(model_input.multi_modal_kwargs or {}),
+            }
+            ########## /INICJALIZACJA I ASSERTY ###########
+            ########## nic ciekawego ###########
+            if htorch.utils.internal.is_lazy():
+                execute_model_kwargs.update({"bypass_hpu_graphs": not use_graphs})
+
+            htorch.core.mark_step()
+            if self.is_driver_worker:
+                model_event_name = ("model_"
+                                    f"{'prompt' if is_prompt else 'decode'}_"
+                                    f"bs{batch_size}_"
+                                    f"seq{seq_len}_"
+                                    f"graphs{'T' if use_graphs else 'F'}")
+            else:
+                model_event_name = 'model_executable'
+            ########## /nic ciekawego ###########
+            # make sure we skip the sampler on the lask rank and only pythonize
+            # if CPU is ahead.
+            if num_steps > 1:
+                sampling_metadata.skip_sampler_cpu_output = True
+                self.model.model.sampler.include_gpu_probs_tensor = True
             for i in range(num_steps):
-                import pdb; pdb.set_trace()
+                print()
+                print(f"is_prompt: {is_prompt}")
+                print()
+                print(f"input_ids: {execute_model_kwargs['input_ids']}")
+                print(f"positions: {execute_model_kwargs['positions']}")
+                print(f"attn_metadata: {execute_model_kwargs['attn_metadata']}")
+                print()
                 ########## model.forward ##########
                 with self.profiler.record_event('internal', model_event_name):
                     hidden_states = self.model.forward(
@@ -2061,27 +2074,26 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     # result = self._prepare_decode(seq_group_metadata_list)
                     execute_model_kwargs.update({"input_ids": output,
                                                  "positions": execute_model_kwargs['positions'] + 1},)
-                                                #  "attn_metadata": )
-                elif num_steps > 1:  # last step
-                    output = self._decode_sampler_outputs(model_input)
-
-
-        else:
-            print("not first multistep")
-            return []
+                                                 #  "attn_metadata": )
+                if model_input.async_callback is not None:
+                    model_input.async_callback()
+            if num_steps == 1:
+                return [output]
+            else:
+                return []
         ########## PROFILER ###########
-        if self.is_driver_worker and self.profiler.enabled:
-            # Stop recording 'execute_model' event
-            self.profiler.end()
-            event_end = self.profiler.get_timestamp_us()
-            counters = self.profiler_counter_helper.get_counter_dict(
-                cache_config=self.cache_config,
-                duration=event_end - self.event_start,
-                seq_len=seq_len,
-                batch_size_padded=batch_size_padded,
-                real_batch_size=real_batch_size,
-                is_prompt=is_prompt)
-            self.profiler.record_counter(self.event_start, counters)
+        # if self.is_driver_worker and self.profiler.enabled:
+        #     # Stop recording 'execute_model' event
+        #     self.profiler.end()
+        #     event_end = self.profiler.get_timestamp_us()
+        #     counters = self.profiler_counter_helper.get_counter_dict(
+        #         cache_config=self.cache_config,
+        #         duration=event_end - self.event_start,
+        #         seq_len=seq_len,
+        #         batch_size_padded=batch_size_padded,
+        #         real_batch_size=real_batch_size,
+        #         is_prompt=is_prompt)
+        #     self.profiler.record_counter(self.event_start, counters)
         ########## /PROFILER ###########
         return output if type(output) is list else [output]
 
@@ -2105,7 +2117,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     scheduler_outputs=ctx.scheduler_outputs,
                     is_async=False,
                     is_last_step=False,
-                    is_first_step_output=i == 0)
+                    is_first_step_output=False)  # nie wiem co to robi
+                    # is_first_step_output=i == 0)
                 model_input.async_callback()
         
         if use_async_out_proc:
