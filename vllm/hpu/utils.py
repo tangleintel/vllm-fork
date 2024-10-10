@@ -58,4 +58,10 @@ class VLLMKVCache(torch.nn.Module):
         return cache
 
     def fetch_from_cache(self, cache, blocks):
-        return cache.index_select(0, blocks)
+        if False:
+            return cache.index_select(0, blocks)
+        else:
+            #print("libin featch from cache ", blocks.shape, cache[:blocks.size(0)].shape)
+            return cache[:blocks.size(0)]
+            
+            
