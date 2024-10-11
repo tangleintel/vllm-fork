@@ -38,6 +38,7 @@ class MultiStepHPUWorker(HPUWorker):
             ############# ??? #############
             worker_input = dataclasses.replace(
                 worker_input,
+                # num_steps=4)
                 num_steps=execute_model_req.num_lookahead_slots + 1)
             ############# /??? #############
             model_input: ModelInputForHPU = (
