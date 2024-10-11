@@ -1927,7 +1927,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         intermediate_tensors: Optional[IntermediateTensors] = None,
         num_steps: int = 1,
         warmup_mode=False,
-        seq_group_metadata_list=None,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
         if not model_input.is_first_multi_step:
             if not model_input.is_last_step:
@@ -1947,6 +1946,11 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             ########### INICJALIZACJA I ASSERTY ###########
             input_tokens = model_input.input_tokens
             input_positions = model_input.input_positions
+            print()
+            print()
+            print(f"EXECUTE MODEL input_positions: {input_positions}")
+            print()
+            print()
             attn_metadata = model_input.attn_metadata
             sampling_metadata = model_input.sampling_metadata
             real_batch_size = model_input.real_batch_size
@@ -2040,8 +2044,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if not self.is_driver_worker:
                     return []
 
-                # if model_input.async_callback is not None and num_steps == 1:
-                #     model_input.async_callback()
+                # import pdb; pdb.set_trace()
+                if model_input.async_callback is not None:# and num_steps == 1:
+                    model_input.async_callback()
                 ########## /nic ciekawego ###########
                 ########## SAMPLING ###########
                 # Sample the next token.
@@ -2074,37 +2079,38 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     # result = self._prepare_decode(seq_group_metadata_list)
                     ###############################################################################
                     # positions = execute_model_kwargs['positions'] + 1
-                    # block_list = execute_model_kwargs['attn_metadata'].block_list
-                    # block_number = block_list.gather(
-                    #     1,
-                    #     positions.long() // self.block_size)
                     # block_offset = positions % self.block_size
-                    # is_padding = slot_mapping == _PAD_SLOT_ID
-                    # slot_mapping = block_number * self.block_size + block_offset
-                    # slot_mapping = slot_mapping.long()
-                    # slot_mapping = torch.where(is_padding, _PAD_SLOT_ID,
-                    #                            slot_mapping)
 
                     # execute_model_kwargs.update({"input_ids": output,
                     #                              "positions": positions})
-                    # execute_model_kwargs['attn_metadata'].slot_mapping = slot_mapping
-                    # execute_model_kwargs['attn_metadata'].block_offsets = positions % self.block_size
+                    # # execute_model_kwargs['attn_metadata'].slot_mapping = slot_mapping
+                    # import pdb; pdb.set_trace()
+                    # execute_model_kwargs['attn_metadata'].block_offsets = block_offset
                     #                              #  "attn_metadata": )
                     ###############################################################################
-                    import pdb; pdb.set_trace()
+                    ###############################################################################
 
+                    output_cpu = tuple(output.cpu().numpy().flatten())
+                    ctx = model_input.async_callback.keywords["ctx"]
+                    seq_group_metadata_list = ctx.seq_group_metadata_list
+                    for seq_group_metadata in seq_group_metadata_list:
+                        seq_group_metadata.seq_data[0].output_token_ids += output_cpu
+                        seq_group_metadata.seq_data[0].update_num_computed_tokens(1)
+                        # block_tables?
+                    # import pdb; pdb.set_trace()
                     result = self._prepare_decode(seq_group_metadata_list)
                     execute_model_kwargs.update({"input_ids": result.input_tokens,
+                                                #  "positions": execute_model_kwargs['positions'] + 1,
                                                  "positions": result.input_positions,
-                                                 "attn_metadata": result.attn_metadata})
-                    result.input_tokens
-                    result.input_positions
-                    result.attn_metadata
-                if model_input.async_callback is not None:
-                    model_input.async_callback()
+                                                 "attn_metadata": self.trim_attn_metadata(result.attn_metadata)})
+                    ###############################################################################
+            print("zmiana 10")
+            # if model_input.async_callback is not None:
+            #     model_input.async_callback()
             if num_steps == 1:
                 return [output]
             else:
+                # import pdb; pdb.set_trace()
                 return []
         ########## PROFILER ###########
         # if self.is_driver_worker and self.profiler.enabled:
@@ -2123,6 +2129,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         return output if type(output) is list else [output]
 
     def _decode_sampler_outputs(self, model_input):
+        print()
+        print("_decode_sampler_outputs")
+        print()
         use_async_out_proc = model_input.async_callback is not None
         sampler_outputs = []
         num_outputs = len(self.cached_step_outputs)
@@ -2132,18 +2141,22 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             sampler_output = self._make_decode_output(next_token_ids,
                                                       model_input.sampling_metadata.seq_groups)
             sampler_outputs.append(sampler_output)
+
             if i < num_outputs - 1 and use_async_out_proc:
                 assert model_input.async_callback is not None
+                # TU TRZEBA POKOMBINOWAĆ
                 ctx = model_input.async_callback.keywords[  # type: ignore
                     "ctx"]
+                # import pdb; pdb.set_trace()
                 ctx.append_output(
-                    outputs=[sampler_output],
+                    outputs=sampler_outputs,
                     seq_group_metadata_list=ctx.seq_group_metadata_list,
                     scheduler_outputs=ctx.scheduler_outputs,
                     is_async=False,
                     is_last_step=False,
                     is_first_step_output=False)  # nie wiem co to robi
                     # is_first_step_output=i == 0)
+                # import pdb; pdb.set_trace()
                 model_input.async_callback()
         
         if use_async_out_proc:
