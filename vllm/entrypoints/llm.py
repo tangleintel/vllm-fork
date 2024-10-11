@@ -217,6 +217,7 @@ class LLM:
         self.request_counter = Counter()
 
     def get_tokenizer(self) -> AnyTokenizer:
+        import pdb; pdb.set_trace()
         return self.llm_engine.get_tokenizer_group(TokenizerGroup).tokenizer
 
     def set_tokenizer(self, tokenizer: AnyTokenizer) -> None:

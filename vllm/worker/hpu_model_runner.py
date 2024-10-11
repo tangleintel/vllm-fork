@@ -1900,6 +1900,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             assert attn_metadata is not None
             is_prompt = attn_metadata.is_prompt
             assert is_prompt is not None
+            # if not is_prompt:
+            #     import pdb; pdb.set_trace()
             batch_size = input_tokens.size(0)
             seq_len = self._seq_len(attn_metadata)
             use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
@@ -2033,7 +2035,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     ctx = model_input.async_callback.keywords["ctx"]
                     seq_group_metadata_list = ctx.seq_group_metadata_list
                     for seq_group_metadata in seq_group_metadata_list:
-                        seq_group_metadata.seq_data[0].output_token_ids += output_cpu
+                        seq_group_metadata.seq_data[0].output_token_ids += output_cpu  # tu się dodają tokeny
                         seq_group_metadata.seq_data[0].update_num_computed_tokens(1)
                         # block_tables?
                     # import pdb; pdb.set_trace()
