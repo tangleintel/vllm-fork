@@ -304,14 +304,12 @@ class HpuModelAdapter():
             # values manually
             oob_values = metadata.block_mapping.lt(0)
             block_mapping = metadata.block_mapping.masked_fill(oob_values, 0)
-            block_mapping = torch.nn.functional.one_hot(
-                block_mapping,
-                num_classes=batch_size)
+            block_mapping = torch.nn.functional.one_hot(block_mapping,
+                                                        num_classes=batch_size)
             block_mapping.masked_fill_(oob_values.unsqueeze(-1), 0)
         else:
-            block_mapping = torch.nn.functional.one_hot(
-                metadata.block_mapping,
-                num_classes=batch_size)
+            block_mapping = torch.nn.functional.one_hot(metadata.block_mapping,
+                                                        num_classes=batch_size)
         block_mapping = block_mapping.to(dtype)
         metadata = metadata._replace(block_mapping=block_mapping,
                                      attn_bias=attn_bias)
