@@ -330,7 +330,6 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             if self.kv_cache is not None else None,
             intermediate_tensors=intermediate_tensors,
             num_steps=num_steps,
-            seq_group_metadata_list=execute_model_req.seq_group_metadata_list,
             **kwargs,
         )
 

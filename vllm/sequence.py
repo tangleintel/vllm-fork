@@ -241,6 +241,7 @@ class SequenceData(msgspec.Struct,
 
     @output_token_ids.setter
     def output_token_ids(self, new_output_token_ids: List[int]) -> None:
+        # import pdb; pdb.set_trace()
         self._output_token_ids = array(VLLM_TOKEN_ID_ARRAY_TYPE,
                                        new_output_token_ids)
         self._update_cached_all_tokens()
