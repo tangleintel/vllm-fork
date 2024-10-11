@@ -95,7 +95,7 @@ class MultiStepHPUWorker(HPUWorker):
                     # notify all other workers to stop their execution loop.
                     broadcast_tensor_dict({}, src=0)
                 return None
-
+            # import pdb; pdb.set_trace()
             model_input, worker_input, _ = self._get_driver_input_and_broadcast(
                 execute_model_req)
             if model_input.is_first_multi_step:
