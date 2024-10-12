@@ -1003,6 +1003,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                        device=self.device)
 
         num_decode_tokens = sum(seq_lens)
+
         if False:
             blocks_used = [len(bt) for bt in block_tables]
             block_list = list(itertools.chain(*block_tables))
@@ -1020,32 +1021,27 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_usage = list(itertools.chain(*block_usage))
 
             block_bucket_size = find_bucket(len(block_list),
-                                            self.decode_block_bucket_cfg)           
+                                            self.decode_block_bucket_cfg)
+
         else:
             block_list = list(itertools.chain(*block_tables))
-            #print("libin debug block_tables ", block_tables)
             max_idx = max(block_list)
-            max_blocks = max(max_idx + 1, len(block_list))
 
+            max_blocks = max(max_idx+1, len(block_list))
             block_bucket_size = find_bucket(max_blocks, self.decode_block_bucket_cfg)
             #print('libin debug MAX_BLOCKS:', max_blocks, 'block_list:', len(block_list),'BLOCK_BUCKET_SIZE:', block_bucket_size, flush=True)
             block_mapping = [None] * block_bucket_size
             block_usage = [None] * block_bucket_size
             for i, bt1 in enumerate(block_tables):
-                #print("libin debug bt ", bt1)
                 for b_u in bt1:
-                    #import pdb;pdb.set_trace()
                     if block_mapping[b_u] is None:
-                        block_mapping[b_u]= i 
+                        block_mapping[b_u]= i
                         block_usage[b_u]= self.block_size
-            block_mapping = [b if b is not None else -1 for b in block_mapping]
-            #print("libin debug block_mapping ", block_mapping)
+            block_mapping = [b if b is not None else 0 for b in block_mapping]
 
             for bt, sl in zip(block_tables, slot_mapping):
                 block_usage[bt[-1]] = sl[-1] % self.block_size + 1
-                #print("libin debug assign " ,  sl[-1], sl[-1] % self.block_size + 1 , ' to ',bt[-1] )
-            block_usage = [u if u is not None else -1 for u in block_usage]
-            #print("libin debug block_usage ", block_usage)
+            block_usage = [u if u is not None else 0 for u in block_usage]
         block_list = pad_list(block_list, block_bucket_size, _PAD_SLOT_ID)
         block_mapping = pad_list(block_mapping, block_bucket_size, 0)
         block_usage = pad_list(block_usage, block_bucket_size, 0)

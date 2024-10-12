@@ -124,8 +124,15 @@ def run_vllm(
             ))
 
     start = time.perf_counter()
-    llm.generate(prompts, sampling_params, use_tqdm=True)
+    outputs = llm.generate(prompts, sampling_params, use_tqdm=True)
     end = time.perf_counter()
+
+    for output in outputs:
+       print('==========')
+       print(f'TEST ACC: request id = {output.request_id}')
+       print(f'TEST ACC: prompt = {len(output.prompt)} {output.prompt}')
+       print(f'TEST ACC: response ={len(output.outputs[0].text)}, {output.outputs[0].text}')
+       print('====\n\n')
     return end - start
 
 
