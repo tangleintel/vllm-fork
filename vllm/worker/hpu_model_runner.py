@@ -1990,7 +1990,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     return []
 
                 # import pdb; pdb.set_trace()
+                # if model_input.async_callback is not None and i == 1:
+                # if model_input.async_callback is not None and num_steps == 1:
                 if model_input.async_callback is not None:# and num_steps == 1:
+                    # import pdb; pdb.set_trace()
                     model_input.async_callback()
                 ########## /nic ciekawego ###########
                 ########## SAMPLING ###########
@@ -2042,8 +2045,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     for i, seq_group_metadata in enumerate(seq_group_metadata_list):
                         for data in seq_group_metadata.seq_data.values():
                             # import pdb; pdb.set_trace()
-                            data.output_token_ids += output_cpu[i:i+1]  # tu się dodają tokeny
-                            data.update_num_computed_tokens(1)
+                            max_output_len = sampling_metadata.seq_groups[0].sampling_params.max_tokens
+                            if len(data.output_token_ids) < max_output_len - 1:
+                                data.output_token_ids += output_cpu[i:i+1]  # tu się dodają tokeny
+                                data.update_num_computed_tokens(1)
+                            # else:
+                                # import pdb; pdb.set_trace()
                         # block_tables?
                     result = self._prepare_decode(seq_group_metadata_list)
                     execute_model_kwargs.update({"input_ids": result.input_tokens,
@@ -2096,10 +2103,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     "ctx"]
                 # import pdb; pdb.set_trace()
                 ctx.append_output(
-                    outputs=sampler_outputs,
+                    # outputs=sampler_outputs,
+                    outputs=[sampler_output],
+                    # outputs=[sampler_outputs[-1]],
                     seq_group_metadata_list=ctx.seq_group_metadata_list,
                     scheduler_outputs=ctx.scheduler_outputs,
                     is_async=False,
+                    # is_async=True,
                     is_last_step=False,
                     is_first_step_output=False)  # nie wiem co to robi
                     # is_first_step_output=i == 0)
