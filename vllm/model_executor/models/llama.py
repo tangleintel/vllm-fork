@@ -53,7 +53,7 @@ from vllm.sequence import IntermediateTensors
 from vllm.utils import is_hip
 
 from .interfaces import SupportsLoRA
-from .utils import PPMissingLayer, is_pp_missing_parameter, make_layers
+from .utils import PPMissingLayer, is_pp_missing_parameter, make_layers, make_empty_intermediate_tensors_factory
 
 is_hpu = current_platform.is_hpu()
 
@@ -303,6 +303,10 @@ class LlamaModel(nn.Module):
             self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         else:
             self.norm = PPMissingLayer()
+        
+        self.make_empty_intermediate_tensors = (
+            make_empty_intermediate_tensors_factory(
+                ["hidden_states", "residual"], config.hidden_size))
 
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids)
@@ -444,7 +448,9 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA):
             self.sampler = Sampler()
         else:
             self.lm_head = PPMissingLayer()
-
+        self.make_empty_intermediate_tensors = (
+            self.model.make_empty_intermediate_tensors)
+        
     def forward(
         self,
         input_ids: torch.Tensor,
@@ -473,20 +479,6 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA):
     ) -> Optional[SamplerOutput]:
         next_tokens = self.sampler(logits, sampling_metadata)
         return next_tokens
-
-    def make_empty_intermediate_tensors(
-            self, batch_size: int, dtype: torch.dtype,
-            device: torch.device) -> IntermediateTensors:
-        return IntermediateTensors({
-            "hidden_states":
-            torch.zeros((batch_size, self.config.hidden_size),
-                        dtype=dtype,
-                        device=device),
-            "residual":
-            torch.zeros((batch_size, self.config.hidden_size),
-                        dtype=dtype,
-                        device=device),
-        })
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
         stacked_params_mapping = [
