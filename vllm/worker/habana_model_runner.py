@@ -1000,12 +1000,20 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                        dtype=torch.long,
                                        device=self.device)
 
+
+        num_decode_tokens = len(seq_lens)
         #blocks_used = [len(bt) for bt in block_tables]
         #print(block_tables)
         block_list = list(itertools.chain(*block_tables))
         max_idx = max(block_list)
         max_blocks = max(max_idx + 1, len(block_list))
         block_bucket_size = find_bucket(max_blocks, self.decode_block_bucket_cfg)
+
+        # Removes extra padding above num_gpu_blocks caused by bucketing
+        # Potentially allows for not calling gather for decodes with padding that
+        # exceeds self.cache_config.num_gpu_blocks (?) 
+        #block_bucket_size = min(block_bucket_size, self.cache_config.num_gpu_blocks)
+        
         #print('MAX_BLOCKS:', max_blocks, 'BLOCK_BUCKET_SIZE:', block_bucket_size, flush=True)
 
         block_mapping = [None] * block_bucket_size

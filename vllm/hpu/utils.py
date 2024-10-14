@@ -58,5 +58,11 @@ class VLLMKVCache(torch.nn.Module):
         return cache
 
     def fetch_from_cache(self, cache, blocks):
-        #return cache.index_select(0, blocks)
+        # For decodes with block size exceeding cache size use gather
+        # if cache.size(0) < blocks.size(0):
+        #     return cache.index_select(0, blocks)
+        # else:
+        #     # No gather
+        #     return cache[:blocks.size(0)]
+
         return cache[:blocks.size(0)]
