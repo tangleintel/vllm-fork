@@ -986,7 +986,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 if len(block_table) == 0:
                     block_number = _PAD_BLOCK_ID
                 else:
-                    block_number = block_table[position // self.block_size]
+                    try:
+                        block_number = block_table[position // self.block_size]
+                    except Exception:
+                        import pdb; pdb.set_trace()
                 if block_number == _PAD_BLOCK_ID:
                     slot = next(dummy_slots)
                 else:
@@ -2012,6 +2015,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 print(f"positions: {execute_model_kwargs['positions']}")
                 print(f"attn_metadata: {execute_model_kwargs['attn_metadata']}")
                 print()
+                # import pdb; pdb.set_trace()
                 ########## model.forward ##########
                 with self.profiler.record_event('internal', model_event_name):
                     hidden_states = self.model.forward(
@@ -2095,11 +2099,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     output_cpu = tuple(output.cpu().numpy().flatten())
                     ctx = model_input.async_callback.keywords["ctx"]
                     seq_group_metadata_list = ctx.seq_group_metadata_list
-                    for seq_group_metadata in seq_group_metadata_list:
-                        seq_group_metadata.seq_data[0].output_token_ids += output_cpu  # tu się dodają tokeny
-                        seq_group_metadata.seq_data[0].update_num_computed_tokens(1)
-                        # block_tables?
                     # import pdb; pdb.set_trace()
+                    for i, seq_group_metadata in enumerate(seq_group_metadata_list):
+                        for data in seq_group_metadata.seq_data.values():
+                            # import pdb; pdb.set_trace()
+                            data.output_token_ids += output_cpu[i:i+1]  # tu się dodają tokeny
+                            data.update_num_computed_tokens(1)
+                        # block_tables?
                     result = self._prepare_decode(seq_group_metadata_list)
                     execute_model_kwargs.update({"input_ids": result.input_tokens,
                                                 #  "positions": execute_model_kwargs['positions'] + 1,
