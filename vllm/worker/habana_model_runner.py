@@ -1012,7 +1012,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         # Removes extra padding above num_gpu_blocks caused by bucketing
         # Potentially allows for not calling gather for decodes with padding that
         # exceeds self.cache_config.num_gpu_blocks (?) 
-        #block_bucket_size = min(block_bucket_size, self.cache_config.num_gpu_blocks)
+        block_bucket_size = min(block_bucket_size, self.cache_config.num_gpu_blocks)
         
         #print('MAX_BLOCKS:', max_blocks, 'BLOCK_BUCKET_SIZE:', block_bucket_size, flush=True)
 
