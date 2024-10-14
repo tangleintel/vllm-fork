@@ -1046,7 +1046,10 @@ class LLMEngine:
             (outputs, seq_group_metadata_list, scheduler_outputs, is_async,
              is_last_step, is_first_step_output,
              skip) = ctx.output_queue.popleft()
-        is_async = True
+        # is_async = True
+        print()
+        print(f"is_async: {is_async}")
+        print()
 
         # Sanity check
         assert len(seq_group_metadata_list) == len(
@@ -1143,6 +1146,7 @@ class LLMEngine:
 
         # Generate outputs for the requests that finished this iteration
         for i in finished_now:
+            # import pdb; pdb.set_trace()
             scheduled_seq_group = scheduler_outputs.scheduled_seq_groups[i]
 
             seq_group = scheduled_seq_group.seq_group
