@@ -49,7 +49,7 @@ class VLLMKVCache(torch.nn.Module):
 
     def __init__(self):
         super(VLLMKVCache, self).__init__()
-
+b
     def forward(self, input, cache, num_kv_cache_passes, num_slots_available,
                 block_indices, block_offset):
         insert_or_update_cache(input, cache, num_kv_cache_passes,
