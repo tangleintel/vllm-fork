@@ -13,6 +13,7 @@ from vllm.inputs import INPUT_REGISTRY, InputContext, LLMInputs
 from vllm.model_executor.layers.activation import get_act_fn
 from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.sampler import Sampler, SamplerOutput
+from vllm.model_executor.model_loader.weight_utils import default_weight_loader
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.multimodal import MULTIMODAL_REGISTRY
 from vllm.sequence import IntermediateTensors
@@ -25,8 +26,8 @@ from .interfaces import SupportsMultiModal, SupportsPP
 from .siglip import (SiglipVisionModel, dummy_image_for_siglip,
                      dummy_seq_data_for_siglip, get_max_siglip_image_tokens,
                      input_processor_for_siglip)
-from .utils import (AutoWeightsLoader, flatten_bn, init_vllm_registered_model,
-                    merge_multimodal_embeddings)
+from .utils import (flatten_bn, group_weights_with_prefix,
+                    init_vllm_registered_model, merge_multimodal_embeddings)
 
 
 class LlavaImagePixelInputs(TypedDict):
@@ -365,8 +366,6 @@ class LlavaForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP):
             input_ids = None
             inputs_embeds = None
         else:
-            # always pass the input via `inputs_embeds`
-            # to make sure the computation graph is consistent
             image_input = self._parse_and_validate_image_input(**kwargs)
 
             if image_input is not None:
@@ -377,10 +376,10 @@ class LlavaForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP):
                 inputs_embeds = merge_multimodal_embeddings(
                     input_ids, inputs_embeds, vision_embeddings,
                     self.config.image_token_index)
+
+                input_ids = None
             else:
-                inputs_embeds = self.language_model.model.get_input_embeddings(
-                    input_ids)
-            input_ids = None
+                inputs_embeds = None
 
         hidden_states = self.language_model.model(input_ids,
                                                   positions,
@@ -407,5 +406,19 @@ class LlavaForConditionalGeneration(nn.Module, SupportsMultiModal, SupportsPP):
         return self.language_model.sample(logits, sampling_metadata)
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]]):
-        loader = AutoWeightsLoader(self)
-        loader.load_weights(weights)
+        # prepare weight iterators for components
+        weights_group = group_weights_with_prefix(weights)
+
+        # load vision encoder
+        self.vision_tower.load_weights(weights_group["vision_tower"])
+
+        # load mlp projector
+        mlp_params_dict = dict(self.multi_modal_projector.named_parameters())
+        for name, loaded_weight in weights_group["multi_modal_projector"]:
+            param = mlp_params_dict[name]
+            weight_loader = getattr(param, "weight_loader",
+                                    default_weight_loader)
+            weight_loader(param, loaded_weight)
+
+        # load llm backbone
+        self.language_model.load_weights(weights_group["language_model"])

@@ -21,9 +21,7 @@ def server():
         "--dtype",
         "bfloat16",
         "--max-model-len",
-        "2048",
-        "--max-num-seqs",
-        "5",
+        "4096",
         "--enforce-eager",
     ]
 

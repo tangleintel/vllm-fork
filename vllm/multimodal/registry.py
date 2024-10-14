@@ -1,6 +1,6 @@
 import functools
 from collections import UserDict
-from typing import Any, Dict, Mapping, Optional, Sequence
+from typing import Dict, Mapping, Optional, Sequence
 
 from vllm.config import ModelConfig
 from vllm.logger import init_logger
@@ -96,12 +96,8 @@ class MultiModalRegistry:
         """
         return self.register_input_mapper("image", mapper)
 
-    def map_input(
-        self,
-        model_config: ModelConfig,
-        data: MultiModalDataDict,
-        mm_processor_kwargs: Optional[Dict[str, Any]] = None,
-    ) -> MultiModalInputs:
+    def map_input(self, model_config: ModelConfig,
+                  data: MultiModalDataDict) -> MultiModalInputs:
         """
         Apply an input mapper to the data passed to the model.
 
@@ -127,8 +123,7 @@ class MultiModalRegistry:
                     f"`--limit-mm-per-prompt`, but found {num_items} items "
                     "in the same prompt.")
 
-            input_dict = plugin.map_input(model_config, data_value,
-                                          mm_processor_kwargs)
+            input_dict = plugin.map_input(model_config, data_value)
             for input_key, input_tensor in input_dict.items():
                 if input_key in merged_dict:
                     raise ValueError(f"The input mappers (keys={set(data)}) "

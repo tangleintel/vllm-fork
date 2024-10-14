@@ -1,13 +1,12 @@
 import itertools
 import warnings
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import (Any, ClassVar, Dict, List, Optional, Sequence, Tuple,
                     Union, cast, overload)
 
 from tqdm import tqdm
 
-from vllm.beam_search import (BeamSearchInstance, BeamSearchOutput,
-                              BeamSearchSequence, get_beam_search_score)
 from vllm.engine.arg_utils import EngineArgs
 from vllm.engine.llm_engine import LLMEngine
 from vllm.entrypoints.chat_utils import (ChatCompletionMessageParam,
@@ -23,8 +22,8 @@ from vllm.model_executor.guided_decoding.guided_fields import (
 from vllm.outputs import EmbeddingRequestOutput, RequestOutput
 from vllm.pooling_params import PoolingParams
 from vllm.prompt_adapter.request import PromptAdapterRequest
-from vllm.sampling_params import (BeamSearchParams, GuidedDecodingParams,
-                                  RequestOutputKind, SamplingParams)
+from vllm.sampling_params import (GuidedDecodingParams, RequestOutputKind,
+                                  SamplingParams)
 from vllm.transformers_utils.tokenizer import (AnyTokenizer, MistralTokenizer,
                                                get_cached_tokenizer)
 from vllm.transformers_utils.tokenizer_group import TokenizerGroup
@@ -32,6 +31,37 @@ from vllm.usage.usage_lib import UsageContext
 from vllm.utils import Counter, deprecate_kwargs, is_list_of
 
 logger = init_logger(__name__)
+
+
+@dataclass
+class BeamSearchSequence:
+    """A sequence for beam search.
+    It keeps track of the tokens and the log probability of the sequence.
+    The text field is optional and will only be filled when the sequence is
+    about to be returned to the user.
+    """
+    # The tokens includes the prompt.
+    tokens: List[int]
+    cum_logprob: float = 0.0
+    text: Optional[str] = None
+
+
+@dataclass
+class BeamSearchOutput:
+    """The output of beam search.
+    It contains the list of the best beam search sequences.
+    The length of the list is equal to the beam width.
+    """
+    sequences: List[BeamSearchSequence]
+
+
+class BeamSearchInstance:
+
+    def __init__(self, prompt_tokens: List[int]):
+        self.beams: List[BeamSearchSequence] = [
+            BeamSearchSequence(tokens=prompt_tokens)
+        ]
+        self.completed: List[BeamSearchSequence] = []
 
 
 class LLM:
@@ -150,7 +180,15 @@ class LLM:
 
         if "disable_log_stats" not in kwargs:
             kwargs["disable_log_stats"] = True
-
+        removed_vision_keys = (
+            "image_token_id",
+            "image_feature_size",
+            "image_input_shape",
+            "image_input_type",
+        )
+        if any(k in kwargs for k in removed_vision_keys):
+            raise TypeError(
+                "There is no need to pass vision-related arguments anymore.")
         engine_args = EngineArgs(
             model=model,
             tokenizer=tokenizer,
@@ -359,7 +397,10 @@ class LLM:
     def beam_search(
         self,
         prompts: List[Union[str, List[int]]],
-        params: BeamSearchParams,
+        beam_width: int,
+        max_tokens: int,
+        ignore_eos: bool = False,
+        temperature: float = 0.0,
     ) -> List[BeamSearchOutput]:
         """
         Generate sequences using beam search.
@@ -367,22 +408,13 @@ class LLM:
         Args:
             prompts: A list of prompts. Each prompt can be a string or a list
                 of token IDs.
-            params: The beam search parameters.
-
+            beam_width: The number of beams to keep at each step.
+            max_tokens: The max number of tokens to generate for each prompt.
+            temperature: The temperature to use for generation.
+        
         TODO: how does beam search work together with length penalty, frequency
         penalty, and stopping criteria, etc.?
         """
-
-        beam_width = params.beam_width
-        max_tokens = params.max_tokens
-        temperature = params.temperature
-        ignore_eos = params.ignore_eos
-        length_penalty = params.length_penalty
-
-        def sort_beams_key(x: BeamSearchSequence) -> float:
-            return get_beam_search_score(x.tokens, x.cum_logprob,
-                                         tokenizer.eos_token_id,
-                                         length_penalty)
 
         tokenizer = self.get_tokenizer()
         # generate 2 * beam_width candidates at each step
@@ -445,7 +477,7 @@ class LLM:
                             else:
                                 instance_new_beams.append(new_beam)
                 sorted_beams = sorted(instance_new_beams,
-                                      key=sort_beams_key,
+                                      key=lambda x: x.cum_logprob,
                                       reverse=True)
                 instance.beams = sorted_beams[:beam_width]
 
@@ -453,7 +485,7 @@ class LLM:
         for instance in instances:
             instance.completed.extend(instance.beams)
             sorted_completed = sorted(instance.completed,
-                                      key=sort_beams_key,
+                                      key=lambda x: x.cum_logprob,
                                       reverse=True)
             best_beams = sorted_completed[:beam_width]
 
@@ -475,7 +507,6 @@ class LLM:
         add_generation_prompt: bool = True,
         continue_final_message: bool = False,
         tools: Optional[List[Dict[str, Any]]] = None,
-        mm_processor_kwargs: Optional[Dict[str, Any]] = None,
     ) -> List[RequestOutput]:
         """
         Generate responses for a chat conversation.
@@ -505,8 +536,6 @@ class LLM:
             continue_final_message: If True, continues the final message in
                 the conversation instead of starting a new one. Cannot be `True`
                 if `add_generation_prompt` is also `True`.
-            mm_processor_kwargs: Multimodal processor kwarg overrides for this
-                chat request. Only used for offline requests.
 
         Returns:
             A list of ``RequestOutput`` objects containing the generated
@@ -517,13 +546,10 @@ class LLM:
         # Handle multi and single conversations
         if is_list_of(messages, list):
             # messages is List[List[...]]
-            list_of_messages = cast(List[List[ChatCompletionMessageParam]],
-                                    messages)
+            list_of_messages = messages
         else:
             # messages is List[...]
-            list_of_messages = [
-                cast(List[ChatCompletionMessageParam], messages)
-            ]
+            list_of_messages = [messages]
 
         prompts: List[Union[TokensPrompt, TextPrompt]] = []
 
@@ -531,9 +557,6 @@ class LLM:
             tokenizer = self.get_tokenizer()
             model_config = self.llm_engine.get_model_config()
 
-            # NOTE: _parse_chat_message_content_parts() currently doesn't
-            # handle mm_processor_kwargs, since there is no implementation in
-            # the chat message parsing for it.
             conversation, mm_data = parse_chat_messages(
                 msgs, model_config, tokenizer)
 
@@ -565,9 +588,6 @@ class LLM:
 
             if mm_data is not None:
                 prompt["multi_modal_data"] = mm_data
-
-            if mm_processor_kwargs is not None:
-                prompt["mm_processor_kwargs"] = mm_processor_kwargs
 
             prompts.append(prompt)
 

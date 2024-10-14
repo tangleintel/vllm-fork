@@ -17,17 +17,10 @@ serving_column_mapping = {
     "request_throughput": "Tput (req/s)",
     "mean_ttft_ms": "Mean TTFT (ms)",
     "std_ttft_ms": "Std TTFT (ms)",
-    "median_ttft_ms": "Median TTFT (ms)",
     "mean_itl_ms": "Mean ITL (ms)",
     "std_itl_ms": "Std ITL (ms)",
-    "median_itl_ms": "Median ITL (ms)",
-    "mean_tpot_ms": "Mean TPOT (ms)",
-    "std_tpot_ms": "Std TPOT (ms)",
-    "median_tpot_ms": "Median TPOT (ms)",
-    "total_token_throughput": "Total Token Tput (tok/s)",
+    "input_throughput": "Input Tput (tok/s)",
     "output_throughput": "Output Tput (tok/s)",
-    "total_input_tokens": "Total input tokens",
-    "total_output_tokens": "Total output tokens",
     "engine": "Engine",
 }
 

@@ -130,9 +130,6 @@ class MQLLMEngine:
     def from_engine_args(cls, engine_args: AsyncEngineArgs,
                          usage_context: UsageContext, ipc_path: str):
         """Creates an MQLLMEngine from the engine arguments."""
-        # Setup plugins for each process
-        from vllm.plugins import load_general_plugins
-        load_general_plugins()
 
         engine_config = engine_args.create_engine_config()
 
@@ -285,8 +282,7 @@ class MQLLMEngine:
                 params=request.params,
                 lora_request=request.lora_request,
                 trace_headers=request.trace_headers,
-                prompt_adapter_request=request.prompt_adapter_request,
-                priority=request.priority)
+                prompt_adapter_request=request.prompt_adapter_request)
 
             if self.log_requests:
                 logger.info("Added request %s.", request.request_id)

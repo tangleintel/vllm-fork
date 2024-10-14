@@ -1,7 +1,6 @@
-from vllm import LLM, SamplingParams
+from time import time
 
-# NOTE: This is just a running example. For benchmarking purpose,
-# please see benchmarks/benchmark_prefix_caching.py
+from vllm import LLM, SamplingParams
 
 # Common prefix.
 prefix = (
@@ -38,7 +37,9 @@ print("Results without `enable_prefix_caching`")
 
 # Generate texts from the prompts. The output is a list of RequestOutput objects
 # that contain the prompt, generated text, and other information.
+start_time_regular = time()
 outputs = regular_llm.generate(generating_prompts, sampling_params)
+duration_regular = time() - start_time_regular
 
 regular_generated_texts = []
 # Print the outputs.
@@ -54,7 +55,9 @@ print("-" * 80)
 prefix_cached_llm.generate(generating_prompts[0], sampling_params)
 
 # Generate with prefix caching.
+start_time_cached = time()
 outputs = prefix_cached_llm.generate(generating_prompts, sampling_params)
+duration_cached = time() - start_time_cached
 
 print("Results with `enable_prefix_caching`")
 
@@ -74,3 +77,6 @@ generated_same = all([
     for i in range(len(prompts))
 ])
 print(f"Generated answers are the same: {generated_same}")
+
+speedup = round(duration_regular / duration_cached, 2)
+print(f"Speed up of cached generation compared to the regular is: {speedup}")
