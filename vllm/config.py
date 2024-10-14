@@ -173,7 +173,7 @@ class ModelConfig:
         self.quantization_param_path = quantization_param_path
         self.enforce_eager = enforce_eager
         if max_context_len_to_capture is not None:
-            raise ValueError("`max__to_capture` is deprecated. "
+            raise ValueError("`max_context_len_to_capture` is deprecated. "
                              "Use `max_seq_len_to_capture` instead.")
         self.max_seq_len_to_capture = max_seq_len_to_capture
         self.max_logprobs = max_logprobs
