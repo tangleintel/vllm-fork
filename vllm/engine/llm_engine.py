@@ -317,7 +317,7 @@ class LLMEngine:
             self.tokenizer = None
             self.detokenizer = None
             tokenizer_group = None
-        import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
 
         # Ensure that the function doesn't contain a reference to self,
         # to avoid engine GC issues
@@ -1920,7 +1920,7 @@ class LLMEngine:
             logger.debug(
                 "Building guided decoding logits processor in "
                 "LLMEngine. Params: %s", guided_decoding)
-            import pdb; pdb.set_trace()
+            # import pdb; pdb.set_trace()
             tokenizer = self.get_tokenizer(lora_request=lora_request)
             guided_decoding.backend = guided_decoding.backend or \
                 self.decoding_config.guided_decoding_backend
