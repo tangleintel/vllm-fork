@@ -110,13 +110,6 @@ class PaddingAwareSchedulingBudget(SchedulingBudget):
     _max_seq_len: int = 0
     _num_curr_prefill_seqs: int = 0
 
-    def _debug_validator(self):
-        assert self._num_curr_prefill_seqs == len(
-            self._prefill_request_ids_max_seq_lens)
-        if self._num_curr_prefill_seqs != 0:
-            assert self._max_seq_len == max(
-                self._prefill_request_ids_max_seq_lens.values())
-
     def _generic_padding_fn(self, batch_size, max_seq_len) -> int:
         return batch_size * max_seq_len
 
@@ -160,7 +153,6 @@ class PaddingAwareSchedulingBudget(SchedulingBudget):
         self._prefill_request_ids_max_seq_lens[req_id] = max_seq_len
         self._num_curr_prefill_seqs += num_curr_prefill_seqs
         self._maybe_update_max_seq_len(max_seq_len)
-        self._debug_validator()
 
     def subtract_prefill_seqs(self, req_id, num_curr_prefill_seqs):
         if req_id in self._prefill_request_ids_max_seq_lens:
@@ -168,7 +160,6 @@ class PaddingAwareSchedulingBudget(SchedulingBudget):
             self._num_curr_prefill_seqs -= num_curr_prefill_seqs
             if popped_seq_len == self._max_seq_len:
                 self._maybe_update_max_seq_len()
-        self._debug_validator()
 
     def can_schedule(self,
                      *args,
@@ -184,26 +175,10 @@ class PaddingAwareSchedulingBudget(SchedulingBudget):
         new_max_seq_len = max(max(self._max_seq_len, max_seq_len), 1)
         padding_fn = self._padding_fn_selector()
         num_new_padded_tokens = padding_fn(new_batch_size, new_max_seq_len)
-        self._debug_validator()
         result = num_new_padded_tokens <= self.token_budget
-        curr_padded_tokens = padding_fn(self._num_curr_prefill_seqs,
-                                        self._max_seq_len)
-        stats = f"curr_batch_size: {self._num_curr_prefill_seqs}, curr_max_seq_len: {self._max_seq_len}, curr_num_padded_tokens: {curr_padded_tokens} | new_batch_size: {new_batch_size}, new_max_seq_len: {new_max_seq_len}, new_num_padded_tokens: {num_new_padded_tokens} | self.num_batched_tokens {self.num_batched_tokens}"  # noqa: E501
-        logged_error_msg = False
-        if not result:
-            msg = f"[PaddingAwareScheduler DEBUG] CANNOT schedule prefill sequence. Reason: Exceeded token budget ({self.token_budget}) after padding. | {stats}"  # noqa: E501
-            logger.info(msg)
-            logged_error_msg = True
         if self.max_num_prefill_seqs is not None and result:
             result = self._num_curr_prefill_seqs + num_new_seqs \
                 <= self.max_num_prefill_seqs
-        if not result and not logged_error_msg:
-            msg = f"[PaddingAwareScheduler DEBUG] CANNOT schedule prefill sequence. Reason: Exceeded max_num_prefill_seqs ({self.max_num_prefill_seqs}) after padding. | {stats}"  # noqa: E501
-            logger.info(msg)
-        #else:
-        #    msg = f"[PaddingAwareScheduler DEBUG] CAN schedule sequence. | {stats}" # noqa: E501
-        #    logger.info(msg)
-        self._debug_validator()
         return result
 
     @property
