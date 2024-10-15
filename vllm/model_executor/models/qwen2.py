@@ -1,6 +1,7 @@
 # coding=utf-8
 # Adapted from
 # https://github.com/huggingface/transformers/blob/v4.28.0/src/transformers/models/qwen2/modeling_qwen2.py
+# Copyright (C) 2024 Habana Labs, Ltd. an Intel Company
 # Copyright 2024 The Qwen team.
 # Copyright 2023 The vLLM team.
 # Copyright 2022 EleutherAI and the HuggingFace Inc. team. All rights reserved.
@@ -47,6 +48,7 @@ from vllm.model_executor.model_loader.weight_utils import (
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
+from vllm.utils import is_hpu
 
 from .interfaces import SupportsLoRA, SupportsPP
 from .utils import (AutoWeightsLoader, PPMissingLayer, is_pp_missing_parameter,
@@ -448,3 +450,6 @@ class Qwen2ForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
                            if self.config.tie_word_embeddings else None),
         )
         loader.load_weights(weights)
+
+        if is_hpu():
+            torch.hpu.synchronize()
