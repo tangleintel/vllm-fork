@@ -2100,26 +2100,28 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     ###############################################################################
 
                     output_cpu = tuple(output.cpu().numpy().flatten())
-                    ctx = model_input.async_callback.keywords["ctx"]
-                    seq_group_metadata_list = ctx.seq_group_metadata_list
+                    if i == 0:
+                        import copy
+                        ctx = model_input.async_callback.keywords["ctx"]
+                        seq_group_metadata_list = ctx.seq_group_metadata_list
+                        seq_group_metadata_list = copy.deepcopy(seq_group_metadata_list)
                     # import pdb; pdb.set_trace()
-                    for i, seq_group_metadata in enumerate(seq_group_metadata_list):
+                    for j, seq_group_metadata in enumerate(seq_group_metadata_list):
                         for data in seq_group_metadata.seq_data.values():
-                            # import pdb; pdb.set_trace()
+                            import pdb; pdb.set_trace()
                             max_output_len = sampling_metadata.seq_groups[0].sampling_params.max_tokens
                             if len(data.output_token_ids) < max_output_len - 1:
-                                data.output_token_ids += output_cpu[i:i+1]  # tu się dodają tokeny
+                                data.output_token_ids += output_cpu[j:j+1]  # tu się dodają tokeny
                                 data.update_num_computed_tokens(1)
                             # else:
                                 # import pdb; pdb.set_trace()
                         # block_tables?
                     result = self._prepare_decode(seq_group_metadata_list)
                     execute_model_kwargs.update({"input_ids": result.input_tokens,
-                                                #  "positions": execute_model_kwargs['positions'] + 1,
+                                                 "positions": execute_model_kwargs['positions'] + 1,
                                                  "positions": result.input_positions,
                                                  "attn_metadata": self.trim_attn_metadata(result.attn_metadata)})
                     ###############################################################################
-            print("zmiana 10")
             # if model_input.async_callback is not None:
             #     model_input.async_callback()
             if num_steps == 1:
