@@ -158,7 +158,7 @@ class Detokenizer:
         seq.tokens.extend(new_tokens)
         seq.prefix_offset = prefix_offset
         seq.read_offset = read_offset
-        # import pdb; pdb.set_trace()
+        import pdb; pdb.set_trace()
         seq.output_text += new_decoded_token_text
 
         return len(new_decoded_token_text)
