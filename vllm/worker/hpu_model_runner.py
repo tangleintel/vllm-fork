@@ -5,7 +5,6 @@
 import collections
 import contextlib
 import dataclasses
-from dataclasses import dataclass, field
 import functools
 import gc
 import itertools
@@ -14,6 +13,7 @@ import operator
 import os
 import time
 from array import array
+from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import (TYPE_CHECKING, Any, Callable, Dict, List, NamedTuple,
                     Optional, Set, Tuple, Type, TypeVar, Union)

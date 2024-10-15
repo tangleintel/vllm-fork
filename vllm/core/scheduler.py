@@ -121,8 +121,8 @@ class PaddingAwareSchedulingBudget(SchedulingBudget):
         return batch_size * max_seq_len
 
     def _hpu_padding_fn(self, batch_size, max_seq_len):
-        from vllm.worker.hpu_model_runner import (find_bucket,
-                                                  HPUBucketingGlobalState)
+        from vllm.worker.hpu_model_runner import (HPUBucketingGlobalState,
+                                                  find_bucket)
         padded_bs = batch_size
         padded_seq = max_seq_len
 
