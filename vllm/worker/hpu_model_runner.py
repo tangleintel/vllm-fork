@@ -1501,14 +1501,15 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.profiler.start('internal', 'warmup')
         max_blocks = kv_caches[0][0].size(0)
 
-        self.prompt_buckets, prompt_omitted_buckets = generate_prompt_buckets(
+        self.bucketing_global_state.prompt_buckets, prompt_omitted_buckets = \
+            generate_prompt_buckets(
             self.bucketing_global_state.prompt_bs_bucket_cfg,
             self.bucketing_global_state.prompt_seq_bucket_cfg,
             self.max_num_batched_tokens)
 
-        msg = (
-            f"Generated {len(self.prompt_buckets)} "
-            f"prompt buckets [bs, seq]: {list(sorted(self.prompt_buckets))}")
+        msg = (f"Generated {len(self.bucketing_global_state.prompt_buckets)} "
+               f"prompt buckets [bs, seq]: \
+                {list(sorted(self.bucketing_global_state.prompt_buckets))}")
         logger.info(msg)
 
         msg = (f"Omitted {len(prompt_omitted_buckets)} "

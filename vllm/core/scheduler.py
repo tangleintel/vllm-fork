@@ -185,18 +185,19 @@ class PaddingAwareSchedulingBudget(SchedulingBudget):
         padding_fn = self._padding_fn_selector()
         num_new_padded_tokens = padding_fn(new_batch_size, new_max_seq_len)
         self._debug_validator()
-        result = self.num_batched_tokens + num_new_padded_tokens \
-            <= self.token_budget
+        result = num_new_padded_tokens <= self.token_budget
         curr_padded_tokens = padding_fn(self._num_curr_prefill_seqs,
                                         self._max_seq_len)
-        stats = f"curr_batch_size: {self._num_curr_prefill_seqs}, curr_max_seq_len: {self._max_seq_len}, curr_num_padded_tokens: {curr_padded_tokens} | new_batch_size: {new_batch_size}, new_max_seq_len: {new_max_seq_len}, new_num_padded_tokens: {num_new_padded_tokens}"  # noqa: E501
+        stats = f"curr_batch_size: {self._num_curr_prefill_seqs}, curr_max_seq_len: {self._max_seq_len}, curr_num_padded_tokens: {curr_padded_tokens} | new_batch_size: {new_batch_size}, new_max_seq_len: {new_max_seq_len}, new_num_padded_tokens: {num_new_padded_tokens} | self.num_batched_tokens {self.num_batched_tokens}"  # noqa: E501
+        logged_error_msg = False
         if not result:
             msg = f"[PaddingAwareScheduler DEBUG] CANNOT schedule prefill sequence. Reason: Exceeded token budget ({self.token_budget}) after padding. | {stats}"  # noqa: E501
             logger.info(msg)
+            logged_error_msg = True
         if self.max_num_prefill_seqs is not None and result:
             result = self._num_curr_prefill_seqs + num_new_seqs \
                 <= self.max_num_prefill_seqs
-        if not result:
+        if not result and not logged_error_msg:
             msg = f"[PaddingAwareScheduler DEBUG] CANNOT schedule prefill sequence. Reason: Exceeded max_num_prefill_seqs ({self.max_num_prefill_seqs}) after padding. | {stats}"  # noqa: E501
             logger.info(msg)
         #else:
