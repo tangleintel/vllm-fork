@@ -84,6 +84,7 @@ def run_vllm(
     gpu_memory_utilization: float = 0.9,
     download_dir: Optional[str] = None,
     load_format: str = EngineArgs.load_format,
+    weights_load_device: Optional[str] = None,
 ) -> float:
     from vllm import LLM, SamplingParams
     llm = LLM(
@@ -106,6 +107,11 @@ def run_vllm(
         max_num_batched_tokens=max_num_batched_tokens,
         distributed_executor_backend=distributed_executor_backend,
         load_format=load_format,
+        weights_load_device=weights_load_device,
+        num_lookahead_slots=1,
+        use_v2_block_manager=True,
+        enable_delayed_sampling=True,
+        max_num_seqs=128,
     )
 
     # Add the requests to the engine.
@@ -232,7 +238,8 @@ def main(args: argparse.Namespace):
             args.quantization_param_path, args.device,
             args.enable_prefix_caching, args.enable_chunked_prefill,
             args.max_num_batched_tokens, args.distributed_executor_backend,
-            args.gpu_memory_utilization, args.download_dir, args.load_format)
+            args.gpu_memory_utilization, args.download_dir,
+            args.load_format, args.weights_load_device)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
         elapsed_time = run_hf(requests, args.model, tokenizer, args.n,
@@ -331,7 +338,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '--kv-cache-dtype',
         type=str,
-        choices=['auto', 'fp8', 'fp8_e5m2', 'fp8_e4m3'],
+        choices=['auto', 'fp8', 'fp8_e5m2', 'fp8_e4m3', 'fp8_inc'],
         default="auto",
         help='Data type for kv cache storage. If "auto", will use model '
         'data type. CUDA 11.8+ supports fp8 (=fp8_e4m3) and fp8_e5m2. '
@@ -405,6 +412,11 @@ if __name__ == "__main__":
         'section for more information.\n'
         '* "bitsandbytes" will load the weights using bitsandbytes '
         'quantization.\n')
+    parser.add_argument("--weights-load-device",
+                        type=str,
+                        default="cpu",
+                        choices=["cuda", "neuron", "hpu", "cpu"],
+                        help='Device on which weights are loaded.')
     args = parser.parse_args()
     if args.tokenizer is None:
         args.tokenizer = args.model
