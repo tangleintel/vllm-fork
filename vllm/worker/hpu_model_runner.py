@@ -985,10 +985,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 if len(block_table) == 0:
                     block_number = _PAD_BLOCK_ID
                 else:
-                    try:
-                        block_number = block_table[position // self.block_size]
-                    except Exception:
-                        import pdb; pdb.set_trace()
+                    block_number = block_table[position // self.block_size]
                 if block_number == _PAD_BLOCK_ID:
                     slot = next(dummy_slots)
                 else:
@@ -1930,27 +1927,19 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
         if not model_input.is_first_multi_step:
             if not model_input.is_last_step:
-                print("not first or last multistep")
+                # print("not first or last multistep")
                 return []
-            print("last step")
+            # print("last step")
             output = self._decode_sampler_outputs(model_input)
         if model_input.is_first_multi_step:
-            ########### LORA ###########
-            print("first step")
+            # print("first step")
             if self.lora_config:
                 assert model_input.lora_requests is not None
                 assert model_input.lora_mapping is not None
                 self.set_active_loras(model_input.lora_requests,
                                     model_input.lora_mapping)
-            ########### /LORA ###########
-            ########### INICJALIZACJA I ASSERTY ###########
             input_tokens = model_input.input_tokens
             input_positions = model_input.input_positions
-            print()
-            print()
-            print(f"EXECUTE MODEL input_positions: {input_positions}")
-            print()
-            print()
             attn_metadata = model_input.attn_metadata
             sampling_metadata = model_input.sampling_metadata
             real_batch_size = model_input.real_batch_size
@@ -1961,8 +1950,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             assert attn_metadata is not None
             is_prompt = attn_metadata.is_prompt
             assert is_prompt is not None
-            # if not is_prompt:
-            #     import pdb; pdb.set_trace()
             batch_size = input_tokens.size(0)
             seq_len = self._seq_len(attn_metadata)
             use_graphs = self._use_graphs(batch_size, seq_len, is_prompt)
@@ -1984,8 +1971,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 "lora_mask": lora_mask,
                 **(model_input.multi_modal_kwargs or {}),
             }
-            ########## /INICJALIZACJA I ASSERTY ###########
-            ########## nic ciekawego ###########
             if htorch.utils.internal.is_lazy():
                 execute_model_kwargs.update({"bypass_hpu_graphs": not use_graphs})
 
@@ -1998,37 +1983,23 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                     f"graphs{'T' if use_graphs else 'F'}")
             else:
                 model_event_name = 'model_executable'
-            ########## /nic ciekawego ###########
             # make sure we skip the sampler on the lask rank and only pythonize
             # if CPU is ahead.
             if num_steps > 1:
                 sampling_metadata.skip_sampler_cpu_output = True
                 self.model.model.sampler.include_gpu_probs_tensor = True
             for i in range(num_steps):
-                print()
-                print(f"is_prompt: {is_prompt}")
-                print()
-                print(f"input_ids: {execute_model_kwargs['input_ids']}")
-                print(f"positions: {execute_model_kwargs['positions']}")
-                print(f"attn_metadata: {execute_model_kwargs['attn_metadata']}")
-                print()
-                # import pdb; pdb.set_trace()
-                ########## model.forward ##########
                 with self.profiler.record_event('internal', model_event_name):
                     hidden_states = self.model.forward(
                         **execute_model_kwargs,
                         selected_token_indices=sampling_metadata.selected_token_indices
                     )
-                ########## /model.forward ##########
 
-                ########### LORA ###########
                 if self.lora_config:
                     LoraMask.setLoraMask(
                         lora_logits_mask.index_select(
                             0, sampling_metadata.selected_token_indices))
-                ########### /LORA ###########
 
-                ########### OBLICZANIE LOGITSÓW ###########
                 # Compute the logits.
                 with self.profiler.record_event(
                         'internal', ('compute_logits_'
@@ -2041,20 +2012,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     logits = self.model.compute_logits(hidden_states,
                                                     sampling_metadata)
                 htorch.core.mark_step()
-                ########### /OBLICZANIE LOGITSÓW ###########
-                ########## nic ciekawego ###########
                 # Only perform sampling in the driver worker.
                 if not self.is_driver_worker:
                     return []
 
-                # import pdb; pdb.set_trace()
-                # if model_input.async_callback is not None and i == 1:
-                # if model_input.async_callback is not None and num_steps == 1:
-                if model_input.async_callback is not None:# and num_steps == 1:
-                    # import pdb; pdb.set_trace()
+                if model_input.async_callback is not None:
                     model_input.async_callback()
-                ########## /nic ciekawego ###########
-                ########## SAMPLING ###########
                 # Sample the next token.
                 with self.profiler.record_event(
                         'internal', ('sample_'
@@ -2069,83 +2032,43 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         output = output.sampled_token_ids
                         self.cached_step_outputs.append(output)
                 htorch.core.mark_step()
-                ########## /SAMPLING ###########
                 if i < num_steps - 1:
-                    # Prepare the inputs for the next step.
-                    # Co tu wymaga update'u?
-                    # zmienia się execute_model_kwargs['attn_metadata'].block_usage
-                    # input_ids
-                    # positions
-                    # kv_caches
-                    # attn_metadata
-                    # intermediate_tensors
-                    # lora_mask
-                    # bypass_hpu_graphs
-                    # execute_model_kwargs["attn_metadata"].slot_mapping
-                    # result = self._prepare_decode(seq_group_metadata_list)
-                    ###############################################################################
-                    # positions = execute_model_kwargs['positions'] + 1
-                    # block_offset = positions % self.block_size
-
-                    # execute_model_kwargs.update({"input_ids": output,
-                    #                              "positions": positions})
-                    # # execute_model_kwargs['attn_metadata'].slot_mapping = slot_mapping
-                    # import pdb; pdb.set_trace()
-                    # execute_model_kwargs['attn_metadata'].block_offsets = block_offset
-                    #                              #  "attn_metadata": )
-                    ###############################################################################
-                    ###############################################################################
-
                     output_cpu = tuple(output.cpu().numpy().flatten())
                     if i == 0:
                         import copy
                         ctx = model_input.async_callback.keywords["ctx"]
                         seq_group_metadata_list = ctx.seq_group_metadata_list
                         seq_group_metadata_list = copy.deepcopy(seq_group_metadata_list)
-                    # import pdb; pdb.set_trace()
                     for j, seq_group_metadata in enumerate(seq_group_metadata_list):
                         for data in seq_group_metadata.seq_data.values():
-                            import pdb; pdb.set_trace()
                             max_output_len = sampling_metadata.seq_groups[0].sampling_params.max_tokens
                             if len(data.output_token_ids) < max_output_len - 1:
-                                data.output_token_ids += output_cpu[j:j+1]  # tu się dodają tokeny
+                                data.output_token_ids += (output_cpu[j:j+1])  # tu się dodają tokeny
                                 data.update_num_computed_tokens(1)
-                            # else:
-                                # import pdb; pdb.set_trace()
-                        # block_tables?
                     result = self._prepare_decode(seq_group_metadata_list)
                     execute_model_kwargs.update({"input_ids": result.input_tokens,
                                                  "positions": execute_model_kwargs['positions'] + 1,
                                                  "positions": result.input_positions,
                                                  "attn_metadata": self.trim_attn_metadata(result.attn_metadata)})
-                    ###############################################################################
-            # if model_input.async_callback is not None:
-            #     model_input.async_callback()
+            if self.is_driver_worker and self.profiler.enabled:
+                # Stop recording 'execute_model' event
+                self.profiler.end()
+                event_end = self.profiler.get_timestamp_us()
+                counters = self.profiler_counter_helper.get_counter_dict(
+                    cache_config=self.cache_config,
+                    duration=event_end - self.event_start,
+                    seq_len=seq_len,
+                    batch_size_padded=batch_size_padded,
+                    real_batch_size=real_batch_size,
+                    is_prompt=is_prompt)
+                self.profiler.record_counter(self.event_start, counters)
             if num_steps == 1:
                 return [output]
             else:
-                # import pdb; pdb.set_trace()
                 return []
-        ########## PROFILER ###########
-        # if self.is_driver_worker and self.profiler.enabled:
-        #     # Stop recording 'execute_model' event
-        #     self.profiler.end()
-        #     event_end = self.profiler.get_timestamp_us()
-        #     counters = self.profiler_counter_helper.get_counter_dict(
-        #         cache_config=self.cache_config,
-        #         duration=event_end - self.event_start,
-        #         seq_len=seq_len,
-        #         batch_size_padded=batch_size_padded,
-        #         real_batch_size=real_batch_size,
-        #         is_prompt=is_prompt)
-        #     self.profiler.record_counter(self.event_start, counters)
-        ########## /PROFILER ###########
         return output if type(output) is list else [output]
 
     def _decode_sampler_outputs(self, model_input):
-        print()
-        print("_decode_sampler_outputs")
-        print()
         use_async_out_proc = model_input.async_callback is not None
         sampler_outputs = []
         num_outputs = len(self.cached_step_outputs)
@@ -2158,22 +2081,16 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
             if i < num_outputs - 1 and use_async_out_proc:
                 assert model_input.async_callback is not None
-                # TU TRZEBA POKOMBINOWAĆ
                 ctx = model_input.async_callback.keywords[  # type: ignore
                     "ctx"]
-                # import pdb; pdb.set_trace()
                 ctx.append_output(
-                    # outputs=sampler_outputs,
                     outputs=[sampler_output],
-                    # outputs=[sampler_outputs[-1]],
                     seq_group_metadata_list=ctx.seq_group_metadata_list,
                     scheduler_outputs=ctx.scheduler_outputs,
                     is_async=False,
-                    # is_async=True,
                     is_last_step=False,
                     is_first_step_output=False)  # nie wiem co to robi
                     # is_first_step_output=i == 0)
-                # import pdb; pdb.set_trace()
                 model_input.async_callback()
         
         if use_async_out_proc:
