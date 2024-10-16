@@ -1,7 +1,7 @@
 # coding=utf-8
 # Adapted from
 # https://github.com/huggingface/transformers/blob/v4.28.0/src/transformers/models/qwen2/modeling_qwen2.py
-# Copyright (C) 2024 Habana Labs, Ltd. an Intel Company
+# Copyright 2024 Habana Labs, Ltd. an Intel Company
 # Copyright 2024 The Qwen team.
 # Copyright 2023 The vLLM team.
 # Copyright 2022 EleutherAI and the HuggingFace Inc. team. All rights reserved.
