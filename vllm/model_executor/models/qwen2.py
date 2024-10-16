@@ -48,7 +48,6 @@ from vllm.model_executor.model_loader.weight_utils import (
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.platforms import current_platform
 from vllm.sequence import IntermediateTensors
-from vllm.utils import is_hpu
 
 from .interfaces import SupportsLoRA, SupportsPP
 from .utils import (AutoWeightsLoader, PPMissingLayer, is_pp_missing_parameter,
@@ -451,5 +450,5 @@ class Qwen2ForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
         )
         loader.load_weights(weights)
 
-        if is_hpu():
+        if current_platform.is_hpu():
             torch.hpu.synchronize()
