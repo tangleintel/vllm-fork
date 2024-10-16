@@ -175,12 +175,13 @@ def generate_decode_buckets(bs_bucket_config, blocks_bucket_config,
     bs_buckets = warmup_range(bs_bucket_config)
     block_buckets = warmup_range(blocks_bucket_config)
     bmin, bstep, bmax = blocks_bucket_config
-    last_bucket = round_up(max_blocks, bstep)
+    last_bucket = max_blocks
     for bs in bs_buckets:
         for blocks in block_buckets:
             if blocks < bs:
                 continue
             if blocks > last_bucket:
+                buckets.append((bs, last_bucket)) 
                 break
             buckets.append((bs, blocks))
     return list(sorted(buckets, key=lambda b: (b[0] * b[1], b[1], b[0])))
@@ -1002,20 +1003,12 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
 
         num_decode_tokens = len(seq_lens)
-        #blocks_used = [len(bt) for bt in block_tables]
-        #print(block_tables)
         block_list = list(itertools.chain(*block_tables))
         max_idx = max(block_list)
         max_blocks = max(max_idx + 1, len(block_list))
         block_bucket_size = find_bucket(max_blocks, self.decode_block_bucket_cfg)
-
-        # Removes extra padding above num_gpu_blocks caused by bucketing
-        # Potentially allows for not calling gather for decodes with padding that
-        # exceeds self.cache_config.num_gpu_blocks (?) 
         block_bucket_size = min(block_bucket_size, self.cache_config.num_gpu_blocks)
         
-        #print('MAX_BLOCKS:', max_blocks, 'BLOCK_BUCKET_SIZE:', block_bucket_size, flush=True)
-
         block_mapping = [None] * block_bucket_size
         block_usage = [None] * block_bucket_size
         for i, bt in enumerate(block_tables):
@@ -1024,20 +1017,10 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                     block_mapping[b] = i
                     block_usage[b] = self.block_size
         block_mapping = [b if b is not None else 0 for b in block_mapping]
-        #print(block_mapping)
 
         for bt, sl in zip(block_tables, slot_mapping):
             block_usage[bt[-1]] = sl[-1] % self.block_size + 1
         block_usage = [u if u is not None else 0 for u in block_usage]
-        #print(block_usage)
-
-        #block_mapping = [[i] * bu for i, bu in enumerate(blocks_used)]
-        #block_mapping = list(itertools.chain(*block_mapping))
-
-        #last_block = [sl % self.block_size + 1 for sl in itertools.chain(*slot_mapping)]
-        #block_usage = [[self.block_size] * (bu - 1) + [lb] for bu, lb in zip(blocks_used, last_block)]
-        #block_usage = list(itertools.chain(*block_usage))
-        #print(block_usage)
 
         block_list = pad_list(block_list, block_bucket_size, _PAD_SLOT_ID)
         block_mapping = pad_list(block_mapping, block_bucket_size, 0)
