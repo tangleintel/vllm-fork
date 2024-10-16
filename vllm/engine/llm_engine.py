@@ -320,7 +320,6 @@ class LLMEngine:
             self.tokenizer = None
             self.detokenizer = None
             tokenizer_group = None
-        # import pdb; pdb.set_trace()
 
         # Ensure that the function doesn't contain a reference to self,
         # to avoid engine GC issues
@@ -1061,10 +1060,6 @@ class LLMEngine:
             (outputs, seq_group_metadata_list, scheduler_outputs, is_async,
              is_last_step, is_first_step_output,
              skip) = ctx.output_queue.popleft()
-        # is_async = True
-        print()
-        print(f"is_async: {is_async}")
-        print()
 
         # Sanity check
         assert len(seq_group_metadata_list) == len(
@@ -1116,7 +1111,6 @@ class LLMEngine:
                 finished_before.append(i)
                 continue
 
-            # import pdb; pdb.set_trace()
             if has_multiple_outputs:
                 output = outputs_by_sequence_group[i]
             else:
@@ -1169,7 +1163,6 @@ class LLMEngine:
 
         # Generate outputs for the requests that finished this iteration
         for i in finished_now:
-            # import pdb; pdb.set_trace()
             scheduled_seq_group = scheduler_outputs.scheduled_seq_groups[i]
 
             seq_group = scheduled_seq_group.seq_group
@@ -1458,7 +1451,6 @@ class LLMEngine:
                 else seq_group_metadata_list[0].state.num_steps == 1
 
             # Add results to the output_queue
-            # import pdb; pdb.set_trace()
             ctx.append_output(outputs=outputs,
                               seq_group_metadata_list=seq_group_metadata_list,
                               scheduler_outputs=scheduler_outputs,
@@ -1951,7 +1943,6 @@ class LLMEngine:
             logger.debug(
                 "Building guided decoding logits processor in "
                 "LLMEngine. Params: %s", guided_decoding)
-            # import pdb; pdb.set_trace()
             tokenizer = self.get_tokenizer(lora_request=lora_request)
             guided_decoding.backend = guided_decoding.backend or \
                 self.decoding_config.guided_decoding_backend

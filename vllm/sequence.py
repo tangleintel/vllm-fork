@@ -241,7 +241,6 @@ class SequenceData(msgspec.Struct,
 
     @output_token_ids.setter
     def output_token_ids(self, new_output_token_ids: List[int]) -> None:
-        import pdb; pdb.set_trace()
         self._output_token_ids = array(VLLM_TOKEN_ID_ARRAY_TYPE,
                                        new_output_token_ids)
         self._update_cached_all_tokens()
@@ -265,7 +264,6 @@ class SequenceData(msgspec.Struct,
         self._mrope_position_delta = new_mrope_position_delta
 
     def append_token_id(self, token_id: int, logprob: float) -> None:
-        import pdb; pdb.set_trace()
         self._output_token_ids.append(token_id)
         self._new_appended_tokens.append(token_id)
         self._cached_all_token_ids.append(token_id)
@@ -346,7 +344,6 @@ class SequenceData(msgspec.Struct,
         self._num_computed_tokens = delta.new_num_computed_tokens
         self._cumulative_logprob = delta.new_cumulative_logprob
         self._stage = delta.new_stage
-        import pdb; pdb.set_trace()
         self._output_token_ids.extend(delta.new_output_token_ids)
         self._cached_all_token_ids.extend(delta.new_output_token_ids)
 
