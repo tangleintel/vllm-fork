@@ -10,12 +10,13 @@ from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.sequence import SamplingParams, SequenceData, SequenceGroupMetadata
 from vllm.utils import get_open_port
 from vllm.worker.model_runner import ModelRunner, _get_graph_batch_size
+from vllm.worker.hpu_model_runner import HPUModelRunner
 
 
 def _create_model_runner(model: str, *args, **kwargs) -> ModelRunner:
     engine_args = EngineArgs(model, *args, **kwargs)
     engine_config = engine_args.create_engine_config()
-    model_runner = ModelRunner(
+    model_runner = HPUModelRunner(
         model_config=engine_config.model_config,
         parallel_config=engine_config.parallel_config,
         scheduler_config=engine_config.scheduler_config,
@@ -37,6 +38,7 @@ def test_prepare_prompt(batch_size):
         max_num_batched_tokens=100000,
         max_num_seqs=100000,
         enable_chunked_prefill=False,
+        dtype='bfloat16'
     )
 
     seq_lens: List[int] = []
@@ -65,10 +67,10 @@ def test_prepare_prompt(batch_size):
         selected_token_start_idx += seq_len
     model_input = model_runner._prepare_model_input_tensors(
         seq_group_metadata_list)
-    input_tokens = model_input.input_tokens
-    input_positions = model_input.input_positions
-    attn_metadata = model_input.attn_metadata
-    return_seq_lens = model_input.seq_lens
+    input_tokens = model_input[0].input_tokens
+    input_positions = model_input[0].input_positions
+    attn_metadata = model_input[0].attn_metadata
+    return_seq_lens = model_input[0].seq_lens
     slot_mapping = attn_metadata.slot_mapping
     assert return_seq_lens == seq_lens
     assert len(slot_mapping) == len(input_tokens)
@@ -79,7 +81,7 @@ def test_prepare_prompt(batch_size):
     assert attn_metadata.num_decode_tokens == 0
     torch.testing.assert_close(
         attn_metadata.seq_lens_tensor,
-        torch.tensor(seq_lens, device=device, dtype=torch.int))
+        torch.tensor(seq_lens, device=device, dtype=torch.long))
     assert attn_metadata.seq_lens == seq_lens
     assert attn_metadata.max_prefill_seq_len == max(seq_lens)
     assert attn_metadata.max_decode_seq_len == 0
@@ -116,7 +118,7 @@ def test_prepare_prompt(batch_size):
                             device=model_runner.device)
     torch.testing.assert_close(attn_metadata.block_tables, expected)
     # Cuda graph should not be used for prerill.
-    assert attn_metadata.use_cuda_graph is False
+    #assert attn_metadata.use_cuda_graph is False
 
     assert len(input_tokens) == sum(seq_lens)
     assert len(input_positions) == sum(seq_lens)

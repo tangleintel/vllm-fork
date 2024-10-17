@@ -68,6 +68,13 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     is_prompt: bool
     attn_bias: Optional[torch.Tensor]
     seq_lens_tensor: Optional[torch.Tensor]
+    seq_lens: Optional[List[int]]
+    max_prefill_seq_len: int
+    max_decode_seq_len: int
+    query_start_loc: Optional[torch.Tensor]
+    seq_start_loc: Optional[torch.Tensor]
+    context_lens_tensor: Optional[torch.Tensor]
+    block_tables: Optional[torch.Tensor]
 
 
 class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
