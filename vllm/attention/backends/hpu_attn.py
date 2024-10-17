@@ -131,6 +131,22 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                 f"Head size {head_size} is not supported by PagedAttention. "
                 f"Supported head sizes are: {suppored_head_sizes}.")
 
+    def update_kv_cache(self, kv_cache, k, v, block_indices, block_offsets):
+        kv_cache_combined = torch.stack(kv_cache, dim=0)
+        num_block_indices = kv_cache_combined.size(1)
+        num_block_offsets = kv_cache_combined.size(2)
+        num_entries_per_cache = num_block_indices * num_block_offsets
+        flat_indices_k = block_indices * num_block_offsets + block_offsets
+        flat_indices_v = num_entries_per_cache + block_indices * num_block_offsets + block_offsets
+        flat_indices_kv = torch.cat((flat_indices_k, flat_indices_v), dim=0)
+        kv_flat = torch.cat((k, v), dim=0)
+        kv_cache_flat = kv_cache_combined.view(-1, kv_cache[0].size(2), kv_cache[0].size(3))
+
+        kv_cache_flat.index_copy_(0, flat_indices_kv, kv_flat)
+        kv_cache_updated = kv_cache_flat.view(2, kv_cache[0].size(
+            0), kv_cache[0].size(1), kv_cache[0].size(2), kv_cache[0].size(3))
+        return kv_cache_updated[0], kv_cache_updated[1]
+
     def forward(
         self,
         query: torch.Tensor,
@@ -170,23 +186,24 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             key = key.unflatten(0, (block_indices.size(0), -1))
             value = value.unflatten(0, (block_indices.size(0), -1))
         if kv_cache is not None:
-            key_cache, value_cache = HPUPagedAttention.split_kv_cache(
-                kv_cache, self.num_kv_heads, self.head_size)
+            # key_cache, value_cache = HPUPagedAttention.split_kv_cache(
+            #     kv_cache, self.num_kv_heads, self.head_size)
 
             # Reshape the input keys and values and store them in the cache.
             # If kv_cache is not provided, the new key and value tensors are
             # not cached. This happens during the initial memory profiling run.
-            key_cache = self.k_cache(key, key_cache, block_indices,
-                                     block_offsets)
-            value_cache = self.v_cache(value, value_cache, block_indices,
-                                       block_offsets)
+            # key_cache = self.k_cache(key, key_cache, block_indices,
+            #                          block_offsets)
+            # value_cache = self.v_cache(value, value_cache, block_indices,
+            #                            block_offsets)
+            key_cache, value_cache = self.update_kv_cache(kv_cache, key, value, block_indices, block_offsets)
 
         if attn_metadata.is_prompt:
             # Prompt run.
             if not self.prefill_usefusedsdpa:
                 # TODO: move this outside of model
                 assert attn_metadata.attn_bias is not None, \
-                        'attn_bias must be set before calling model.forward!'
+                    'attn_bias must be set before calling model.forward!'
                 attn_bias = attn_metadata.attn_bias
                 if self.alibi_slopes is not None:
                     position_bias = _make_alibi_bias(self.alibi_slopes,
