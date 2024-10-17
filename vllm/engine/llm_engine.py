@@ -120,8 +120,8 @@ class SchedulerContext:
                       scheduler_outputs: SchedulerOutputs, is_async: bool,
                       is_last_step: bool,
                       is_first_step_output: Optional[bool]):
-        if len(outputs) == 0:
-            return
+        # if len(outputs) == 0:
+        #     return
         self.output_queue.append(
             OutputData(outputs=outputs,
                        seq_group_metadata_list=seq_group_metadata_list,
@@ -1916,6 +1916,7 @@ class LLMEngine:
             logger.debug(
                 "Building guided decoding logits processor in "
                 "LLMEngine. Params: %s", guided_decoding)
+
             tokenizer = self.get_tokenizer(lora_request=lora_request)
             guided_decoding.backend = guided_decoding.backend or \
                 self.decoding_config.guided_decoding_backend
