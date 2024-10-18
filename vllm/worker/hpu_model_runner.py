@@ -1975,36 +1975,18 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         self.cached_step_outputs.append(output)
                 htorch.core.mark_step()
                 if i < num_steps - 1:
-                    '''
-                    output_cpu = tuple(output.cpu().numpy().flatten())
-                    if i == 0:
-                        import copy
-                        ctx = model_input.async_callback.keywords["ctx"]
-                        seq_group_metadata_list = ctx.seq_group_metadata_list
-                        seq_group_metadata_list = copy.deepcopy(seq_group_metadata_list)
-                    for j, seq_group_metadata in enumerate(seq_group_metadata_list):
-                        for data in seq_group_metadata.seq_data.values():
-                            max_output_len = sampling_metadata.seq_groups[0].sampling_params.max_tokens
-                            if len(data.output_token_ids) < max_output_len - 1:
-                                data.output_token_ids += (output_cpu[j:j+1])  # tu się dodają tokeny
-                                data.update_num_computed_tokens(1)
-                    result = self._prepare_decode(seq_group_metadata_list)
-                    print("result metadata = ", result.attn_metadata)
-                    '''
                     position_ids = execute_model_kwargs['positions'] + 1
-                    print("position_ids = ", position_ids)
-                    print("self.block_size = ", self.block_size)
                     block_offset = position_ids.flatten() % self.block_size
                     attn_metadata.block_offsets = block_offset
-                    print("block offset = ", block_offset)
                     attn_metadata.block_usage[:2] += 1 # Nie wiem jak zdobyc num_queries
                     next_block = torch.eq(block_offset, 0)
+                    
                     attn_metadata.block_indices = torch.where(
                             next_block, attn_metadata.block_indices + 2, # Zamiast 1 num_queries
                             attn_metadata.block_indices)
+                    
                     attn_metadata.slot_mapping = attn_metadata.block_indices * self.block_size + block_offset
-                    # attn_metadata.num_decode_tokens = 26
-                    print("attention metadata = ", attn_metadata)
+                    
                     execute_model_kwargs.update({"input_ids": output,
                                                  "positions": position_ids,
                                                  "attn_metadata": self.trim_attn_metadata(attn_metadata)})
@@ -2090,3 +2072,5 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 finalize_calibration)
             finalize_calibration(self.model.model)
             self._is_inc_finalized = True
+###############################################################################
+# Copyright (C) 2024 Habana Labs, Ltd. an Intel Company
