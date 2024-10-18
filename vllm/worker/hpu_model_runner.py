@@ -2072,5 +2072,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 finalize_calibration)
             finalize_calibration(self.model.model)
             self._is_inc_finalized = True
-###############################################################################
-# Copyright (C) 2024 Habana Labs, Ltd. an Intel Company
+
+    def __del__(self):
+        self.shutdown_inc()
