@@ -2009,7 +2009,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                     f'{"prompt" if is_prompt else "decode"}_bs'
                                     f'{batch_size}_'
                                     f'seq{seq_len}')):
-                    # TODO: możliwe, że taki warunek nie ma sensu i trzeba to lepiej zrozumieć
+                    # TODO: maybe this condition doesn't make sense, need to understand if it's necessary
                     if num_steps == 1:
                         sampling_metadata.selected_token_indices = None
                     logits = self.model.compute_logits(hidden_states,
@@ -2051,7 +2051,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     result = self._prepare_decode(seq_group_metadata_list)
                     execute_model_kwargs.update({"input_ids": result.input_tokens,
                                                  "positions": execute_model_kwargs['positions'] + 1,
-                                                 "positions": result.input_positions,
+                                                #  "positions": result.input_positions,
                                                  "attn_metadata": self.trim_attn_metadata(result.attn_metadata)})
             if self.is_driver_worker and self.profiler.enabled:
                 # Stop recording 'execute_model' event
@@ -2095,7 +2095,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     is_first_step_output=False)  # nie wiem co to robi
                     # is_first_step_output=i == 0)
                 model_input.async_callback()
-        
+
         if use_async_out_proc:
             return [sampler_outputs[-1]]
         else:
