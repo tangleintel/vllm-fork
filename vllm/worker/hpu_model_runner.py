@@ -2047,8 +2047,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 data.update_num_computed_tokens(1)
                     result = self._prepare_decode(seq_group_metadata_list)
                     execute_model_kwargs.update({"input_ids": result.input_tokens,
-                                                 "positions": execute_model_kwargs['positions'] + 1,
-                                                #  "positions": result.input_positions,
+                                                #  "positions": execute_model_kwargs['positions'] + 1, # this way we have errors on 1024 queries and num steps 8 for some reason...
+                                                 "positions": result.input_positions,
                                                  "attn_metadata": self.trim_attn_metadata(result.attn_metadata)})
             if self.is_driver_worker and self.profiler.enabled:
                 # Stop recording 'execute_model' event
