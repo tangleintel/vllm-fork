@@ -1988,19 +1988,24 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 data.output_token_ids += (output_cpu[j:j+1])  # tu się dodają tokeny
                                 data.update_num_computed_tokens(1)
                     result = self._prepare_decode(seq_group_metadata_list)
+                    print("output = ", output)
                     print("result metadata = ", result.attn_metadata)
                     position_ids = execute_model_kwargs['positions'] + 1
                     block_offset = position_ids % self.block_size
                     attn_metadata.block_offsets = block_offset
                     print("block offset = ", block_offset)
-                    # attn_metadata.block_usage[:num_queries] += 1 # Nie wiem jak zdobyc num_queries
+                    attn_metadata.block_usage[:2] += 1 # Nie wiem jak zdobyc num_queries
                     next_block = torch.eq(block_offset, 0)
-                    attn_metadata.block_indices = torch.where(
-                            next_block, attn_metadata.block_indices + 1, # Zamiast 1 num_queries
+                    block_indice = torch.where(
+                            next_block, attn_metadata.block_indices + 2, # Zamiast 1 num_queries
                             attn_metadata.block_indices)
-                    attn_metadata.slot_mapping = attn_metadata.block_indices * self.block_size + block_offset
+                    print("block_indices = ", block_indice)
+                    attn_metadata.block_indices = block_indice
+                    slot_map = attn_metadata.block_indices * self.block_size + block_offset
+                    print("slot_mapping = ", slot_map)
+                    attn_metadata.slot_mapping = slot_map
                     print("attention metadata = ", attn_metadata)
-                    execute_model_kwargs.update({"input_ids": result.input_tokens,
+                    execute_model_kwargs.update({"input_ids": output,
                                                  "positions": position_ids,
                                                  "attn_metadata": self.trim_attn_metadata(attn_metadata)})
             if self.is_driver_worker and self.profiler.enabled:
