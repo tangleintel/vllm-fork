@@ -1,6 +1,3 @@
-######################################################
-# Kopia z multi_step_tpu_worker - trzeba zrozumieć kod
-
 import dataclasses
 from typing import Dict, Optional, Tuple
 
@@ -18,7 +15,6 @@ class MultiStepHPUWorker(HPUWorker):
         super().__init__(*args, **kwargs)
         self.cached_model_input: Optional[ModelInputForHPU] = None
 
-    # Nadpisujemy metodę z LocalOrDistributedWorkerBase (worker_base.py)
     def _get_driver_input_and_broadcast(
         self, execute_model_req: ExecuteModelRequest
     ) -> Tuple[ModelInputForHPU, WorkerInput, Dict[str, torch.Tensor]]:
@@ -35,12 +31,11 @@ class MultiStepHPUWorker(HPUWorker):
             # on first step we prepare the worker input and model input normally
             worker_input: WorkerInput = self.prepare_worker_input(
                 execute_model_req=execute_model_req)
-            ############# ??? #############
             worker_input = dataclasses.replace(
                 worker_input,
                 # num_steps=4)
+                # TODO: not sure if this is correct
                 num_steps=execute_model_req.num_lookahead_slots + 1)
-            ############# /??? #############
             model_input: ModelInputForHPU = (
                 self.model_runner.prepare_model_input(
                     execute_model_req.seq_group_metadata_list,
@@ -79,7 +74,6 @@ class MultiStepHPUWorker(HPUWorker):
         # `LocalOrDistributedWorkerBase._get_driver_input_and_broadcast`
         return model_input, worker_input, {}
 
-    # Nadpisujemy metodę z LocalOrDistributedWorkerBase (worker_base.py)
     def prepare_input(
         self,
         execute_model_req: Optional[ExecuteModelRequest] = None,
@@ -95,7 +89,6 @@ class MultiStepHPUWorker(HPUWorker):
                     # notify all other workers to stop their execution loop.
                     broadcast_tensor_dict({}, src=0)
                 return None
-            # import pdb; pdb.set_trace()
             model_input, worker_input, _ = self._get_driver_input_and_broadcast(
                 execute_model_req)
             if model_input.is_first_multi_step:
