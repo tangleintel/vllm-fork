@@ -1975,14 +1975,15 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         self.cached_step_outputs.append(output)
                 htorch.core.mark_step()
                 if i < num_steps - 1:
+                    num_queries = len(model_input.sampling_metadata.seq_groups)
                     position_ids = execute_model_kwargs['positions'] + 1
                     block_offset = position_ids.flatten() % self.block_size
                     attn_metadata.block_offsets = block_offset
-                    attn_metadata.block_usage[:2] += 1 # Nie wiem jak zdobyc num_queries
+                    attn_metadata.block_usage[:num_queries] += 1
                     next_block = torch.eq(block_offset, 0)
                     
                     attn_metadata.block_indices = torch.where(
-                            next_block, attn_metadata.block_indices + 2, # Zamiast 1 num_queries
+                            next_block, attn_metadata.block_indices + num_queries, 
                             attn_metadata.block_indices)
                     
                     attn_metadata.slot_mapping = attn_metadata.block_indices * self.block_size + block_offset
