@@ -182,7 +182,7 @@ class PaddingAwareSchedulingBudget(SchedulingBudget):
                 <= self.max_num_prefill_seqs
         if self._num_curr_prefill_seqs != 0 and self.max_padding_ratio is not None and result:
             num_tokens = self.num_batched_tokens + num_new_tokens
-            result = 1 - (num_tokens / num_new_padded_tokens) >= self.max_padding_ratio
+            result = 1 - (num_tokens / num_new_padded_tokens) < self.max_padding_ratio
             if not result:
                 print(
                     f"[PaddingAwareSchedulerDebug] CANNOT schedule, exceeded max padding ratio {self.max_padding_ratio} (num_tokens = {num_tokens}, num_padded_tokens = {num_new_padded_tokens}, ratio = {num_tokens / num_new_padded_tokens:.2f})"  # noqa: E501
