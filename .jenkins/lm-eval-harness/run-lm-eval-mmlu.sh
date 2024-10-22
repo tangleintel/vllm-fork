@@ -40,5 +40,5 @@ done
 
 lm_eval --model vllm \
   --model_args pretrained=$MODEL,tensor_parallel_size=$TP_SIZE,distributed_executor_backend="ray",trust_remote_code=true,max_model_len=4096,dtype=bfloat16,num_concurrent=16,max_retries=3,tokenized_requests=False \
-  --tasks mmlu --num_fewshot $FEWSHOT --limit $LIMIT \
+  --tasks mmlu --limit $LIMIT \
   --batch_size $BATCH_SIZE --verbosity DEBUG --log_samples
