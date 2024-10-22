@@ -10,7 +10,10 @@ from vllm.model_executor.layers.fused_moe.layer import (
 from vllm.model_executor.layers.linear import LinearBase, LinearMethodBase
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig)
+from vllm.model_executor.layers.vocab_parallel_embedding import (
+    UnquantizedEmbeddingMethod, VocabParallelEmbedding)
 from vllm.model_executor.utils import set_weight_attrs
+from vllm_hpu_extension.utils import FunctionalLinear
 
 ACTIVATION_SCHEMES = ["static", "dynamic"]
 
@@ -56,6 +59,8 @@ class INCConfig(QuantizationConfig):
             return INCLinearMethod(self)
         elif isinstance(layer, FusedMoE):
             return UnquantizedFusedMoEMethod()
+        elif isinstance(layer, VocabParallelEmbedding):
+            return IncUnquantizedEmbeddingMethod()
         return None
 
     def get_scaled_act_names(self) -> List[str]:
@@ -117,3 +122,16 @@ class INCLinearMethod(LinearMethodBase):
                 return F.linear(x, weight) + bias
             return F.linear(x, weight)
         return F.linear(x, weight, bias)
+
+
+class IncUnquantizedEmbeddingMethod(torch.nn.Module, UnquantizedEmbeddingMethod):
+    """Unquantized method for embeddings."""
+    def __init__(self):
+        super().__init__()
+        self.functional_linear = FunctionalLinear()
+
+    def apply(self,
+              layer: torch.nn.Module,
+              x: torch.Tensor,
+              bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+        return self.functional_linear(x, layer.weight, bias)
