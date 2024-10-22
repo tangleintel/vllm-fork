@@ -252,7 +252,7 @@ class LLMEngine:
             "num_scheduler_steps=%d, chunked_prefill_enabled=%s "
             "multi_step_stream_outputs=%s, enable_prefix_caching=%s, "
             "use_async_output_proc=%s, use_cached_outputs=%s, "
-            "mm_processor_kwargs=%s)",
+            "mm_processor_kwargs=%s, split_qk_v=%s)",
             VLLM_VERSION,
             model_config.model,
             speculative_config,
@@ -290,6 +290,7 @@ class LLMEngine:
             model_config.use_async_output_proc,
             use_cached_outputs,
             model_config.mm_processor_kwargs,
+            cache_config.split_qk_v,
         )
         # TODO(woosuk): Print more configs in debug mode.
         self.model_config = model_config
@@ -385,6 +386,8 @@ class LLMEngine:
                     model_config.enforce_eager,
                     "disable_custom_all_reduce":
                     parallel_config.disable_custom_all_reduce,
+                    "split_qk_v":
+                    cache_config.split_qk_v,
                 })
 
         if self.tokenizer:
