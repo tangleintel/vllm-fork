@@ -2036,6 +2036,57 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         self.cached_step_outputs.append(output)
                 htorch.core.mark_step()
                 if i < num_steps - 1:
+                    '''
+                    output_cpu = tuple(output.cpu().numpy().flatten())
+                    #print("\n\n\n output cpu = ", output_cpu)
+                    if i == 0:
+                        import copy
+                        ctx = model_input.async_callback.keywords["ctx"]
+                        seq_group_metadata_list = ctx.seq_group_metadata_list
+                        seq_group_metadata_list = copy.deepcopy(seq_group_metadata_list)
+                    for j, seq_group_metadata in enumerate(seq_group_metadata_list):
+                        for data in seq_group_metadata.seq_data.values():
+                            max_output_len = sampling_metadata.seq_groups[0].sampling_params.max_tokens
+                            if len(data.output_token_ids) < max_output_len - 1:
+                                data.output_token_ids += (output_cpu[j:j+1])  # tu się dodają tokeny
+                                data.update_num_computed_tokens(1)
+                            else:
+                                if num_steps == 1:
+                                    return[output]
+                                else:
+                                    return[]
+                    result = self._prepare_decode(seq_group_metadata_list)
+                    '''
+                    #########################################################################################
+                    
+                    seq_lens = []
+                    #output_cpu = tuple(output.cpu().numpy().flatten())
+                    if i == 0:
+                        ctx = model_input.async_callback.keywords["ctx"]
+                        seq_group_metadata_list = ctx.seq_group_metadata_list
+                    for seq_group_metadata in seq_group_metadata_list:
+                    # nie wiem co tu sie dzieje:
+                    # for j, seq_group_metadata in enumerate(seq_group_metadata_list):
+                    #     for data in seq_group_metadata.seq_data.values():
+                    #         max_output_len = sampling_metadata.seq_groups[0].sampling_params.max_tokens
+                    #         if len(data.output_token_ids) < max_output_len - 1:
+                    #             data.output_token_ids += (output_cpu[j:j+1])
+                    #             data.update_num_computed_tokens(1)
+                    #         else:
+                    #             if num_steps == 1:
+                    #                 return[output]
+                    #             else:
+                    #                 return[]
+                    
+                        seq_ids = list(seq_group_metadata.seq_data.keys())
+                        for seq_id in seq_ids:
+                            seq_data = seq_group_metadata.seq_data[seq_id]
+                            seq_len = seq_data.get_len()
+                            seq_len = seq_len if self.sliding_window is None else min(
+                                seq_len, self.sliding_window)
+                            seq_lens.append(seq_len)
+                    num_decode_tokens = sum(seq_lens)
+                    attn_metadata.num_decode_tokens = num_decode_tokens
                     num_queries = len(model_input.sampling_metadata.seq_groups)
                     position_ids = execute_model_kwargs['positions'] + 1
                     block_offset = position_ids.flatten() % self.block_size
@@ -2047,11 +2098,25 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             next_block, attn_metadata.block_indices + num_queries, 
                             attn_metadata.block_indices)
                     
-                    attn_metadata.slot_mapping = attn_metadata.block_indices * self.block_size + block_offset
+                    slot_mapping = attn_metadata.block_indices * self.block_size + block_offset
+                    slot_mapping = slot_mapping.long()
+                    slot_mapping = torch.unsqueeze(slot_mapping, 1)
+                    attn_metadata.slot_mapping = slot_mapping
+                    
+                    print("\n\n\n attn_metadata = ", attn_metadata)
+                    #print("\n\n\n result.attn_metadata = ", result.attn_metadata)
+                    print("\n\n\n input hpu = ", output)
+                    #print("\n input cpu = ", result.input_tokens)
+                    print("\n\n\n input positions hpu = ", position_ids)
+                    #print("\n input positions cpu = ", result.input_positions)
+                    print("\n\n\n model input = " , model_input, "\n\n\n")
                     
                     execute_model_kwargs.update({"input_ids": output,
                                                  "positions": position_ids,
                                                  "attn_metadata": self.trim_attn_metadata(attn_metadata)})
+
+                    ######################################################################################### 
+            
             if self.is_driver_worker and self.profiler.enabled:
                 # Stop recording 'execute_model' event
                 self.profiler.end()
