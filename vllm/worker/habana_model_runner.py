@@ -976,7 +976,11 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 seq_lens.append(seq_len)
 
                 block_table = seq_group_metadata.block_tables[seq_id]
-                block_number = block_table[position // self.block_size]
+                if len(block_table) == 0:
+                    block_number = _PAD_BLOCK_ID
+                else:
+                    block_number = block_table[position // self.block_size]
+
                 if block_number == _PAD_BLOCK_ID:
                     slot = next(dummy_slots)
                 else:
@@ -1023,29 +1027,23 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                             self.decode_block_bucket_cfg)           
         else:
             block_list = list(itertools.chain(*block_tables))
-            #print("libin debug block_tables ", block_tables)
             max_idx = max(block_list)
             max_blocks = max(max_idx + 1, len(block_list))
 
             block_bucket_size = find_bucket(max_blocks, self.decode_block_bucket_cfg)
-            #print('libin debug MAX_BLOCKS:', max_blocks, 'block_list:', len(block_list),'BLOCK_BUCKET_SIZE:', block_bucket_size, flush=True)
             block_mapping = [None] * block_bucket_size
             block_usage = [None] * block_bucket_size
             for i, bt1 in enumerate(block_tables):
-                #print("libin debug bt ", bt1)
                 for b_u in bt1:
-                    #import pdb;pdb.set_trace()
                     if block_mapping[b_u] is None:
                         block_mapping[b_u]= i 
                         block_usage[b_u]= self.block_size
             block_mapping = [b if b is not None else -1 for b in block_mapping]
-            #print("libin debug block_mapping ", block_mapping)
 
             for bt, sl in zip(block_tables, slot_mapping):
-                block_usage[bt[-1]] = sl[-1] % self.block_size + 1
-                #print("libin debug assign " ,  sl[-1], sl[-1] % self.block_size + 1 , ' to ',bt[-1] )
+                if bt:
+                    block_usage[bt[-1]] = sl[-1] % self.block_size + 1
             block_usage = [u if u is not None else -1 for u in block_usage]
-            #print("libin debug block_usage ", block_usage)
         block_list = pad_list(block_list, block_bucket_size, _PAD_SLOT_ID)
         block_mapping = pad_list(block_mapping, block_bucket_size, 0)
         block_usage = pad_list(block_usage, block_bucket_size, 0)
@@ -1117,8 +1115,11 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         batch_size_padded = find_bucket(real_batch_size, bucket_cfg)
         batch_size_padding = batch_size_padded - real_batch_size
         seq_group_metadata_list = seq_group_metadata_list.copy()
-        seq_group_metadata_list.extend(seq_group_metadata_list[0]
-                                       for _ in range(batch_size_padding))
+        if batch_size_padding > 0:
+            dummy_seq_group_metadata = self.create_dummy_seq_group_metadata(
+                0, 0, is_prompt)
+            seq_group_metadata_list.extend(dummy_seq_group_metadata
+                                           for _ in range(batch_size_padding))
 
         prefill_reqs = []
         decode_reqs = []
