@@ -1031,6 +1031,7 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             max_blocks = max(max_idx + 1, len(block_list))
 
             block_bucket_size = find_bucket(max_blocks, self.decode_block_bucket_cfg)
+            block_bucket_size = min(block_bucket_size, self.cache_config.num_gpu_blocks)
             block_mapping = [None] * block_bucket_size
             block_usage = [None] * block_bucket_size
             for i, bt1 in enumerate(block_tables):
@@ -1039,7 +1040,6 @@ class HabanaModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                         block_mapping[b_u]= i 
                         block_usage[b_u]= self.block_size
             block_mapping = [b if b is not None else -1 for b in block_mapping]
-
             for bt, sl in zip(block_tables, slot_mapping):
                 if bt:
                     block_usage[bt[-1]] = sl[-1] % self.block_size + 1
