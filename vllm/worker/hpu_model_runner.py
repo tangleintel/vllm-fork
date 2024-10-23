@@ -2060,38 +2060,48 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     #########################################################################################
                     
                     seq_lens = []
-                    #output_cpu = tuple(output.cpu().numpy().flatten())
+                    input_positions = []
+                    block_tables = []
                     if i == 0:
+                        import copy
                         ctx = model_input.async_callback.keywords["ctx"]
                         seq_group_metadata_list = ctx.seq_group_metadata_list
-                    for seq_group_metadata in seq_group_metadata_list:
+                        seq_group_metadata_list = copy.deepcopy(seq_group_metadata_list)
+                    #for seq_group_metadata in seq_group_metadata_list:
                     # nie wiem co tu sie dzieje:
-                    # for j, seq_group_metadata in enumerate(seq_group_metadata_list):
-                    #     for data in seq_group_metadata.seq_data.values():
-                    #         max_output_len = sampling_metadata.seq_groups[0].sampling_params.max_tokens
-                    #         if len(data.output_token_ids) < max_output_len - 1:
-                    #             data.output_token_ids += (output_cpu[j:j+1])
-                    #             data.update_num_computed_tokens(1)
-                    #         else:
-                    #             if num_steps == 1:
-                    #                 return[output]
-                    #             else:
-                    #                 return[]
+                    for j, seq_group_metadata in enumerate(seq_group_metadata_list):
+                        for data in seq_group_metadata.seq_data.values():
+                            max_output_len = sampling_metadata.seq_groups[0].sampling_params.max_tokens
+                            if len(data.output_token_ids) < max_output_len - 1:
+                                data.output_token_ids += (tuple(output[j:j+1]))
+                                data.update_num_computed_tokens(1)
+                            else:
+                                if num_steps == 1:
+                                    return[output]
+                                else:
+                                    return[]
+                        
+                     #   result = self._prepare_decode(seq_group_metadata_list)
                     
                         seq_ids = list(seq_group_metadata.seq_data.keys())
                         for seq_id in seq_ids:
                             seq_data = seq_group_metadata.seq_data[seq_id]
                             seq_len = seq_data.get_len()
+                            position = seq_len - 1
+                            input_positions.append([position])
                             seq_len = seq_len if self.sliding_window is None else min(
                                 seq_len, self.sliding_window)
                             seq_lens.append(seq_len)
+                            block_tables.append(seq_group_metadata.block_tables[seq_id])
                     num_decode_tokens = sum(seq_lens)
                     attn_metadata.num_decode_tokens = num_decode_tokens
                     num_queries = len(model_input.sampling_metadata.seq_groups)
-                    position_ids = execute_model_kwargs['positions'] + 1
+                    position_ids = torch.tensor(input_positions,
+                                                dtype=torch.bfloat16,
+                                                device=self.device)
                     block_offset = position_ids.flatten() % self.block_size
                     attn_metadata.block_offsets = block_offset
-                    attn_metadata.block_usage[:num_queries] += 1
+                    
                     next_block = torch.eq(block_offset, 0)
                     
                     attn_metadata.block_indices = torch.where(
@@ -2103,13 +2113,35 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     slot_mapping = torch.unsqueeze(slot_mapping, 1)
                     attn_metadata.slot_mapping = slot_mapping
                     
-                    print("\n\n\n attn_metadata = ", attn_metadata)
+                    blocks_used = [len(bt) for bt in block_tables if bt]
+                    
+                    last_block = [
+                        sl % self.block_size + 1 for sl in itertools.chain(*slot_mapping.tolist())
+                    ]
+
+                    for i in range(len(blocks_used)):
+                        idx = sum(blocks_used[:i+1]) - 1
+                        attn_metadata.block_usage[idx] = last_block[i]
+                    
+                    #block_usage = [[self.block_size] * (b_u - 1) + [lb]
+                    #    for b_u, lb in zip(blocks_used, last_block)]
+                    #print("\n\n\n blocks used = ", blocks_used)
+                    #print("\n\n\n last block = ", last_block)
+                    #print("\n\n\n block usage = ", block_usage)
+                    #block_usage = list(itertools.chain(*block_usage))
+                    #block_usage = torch.tensor(block_usage,
+                    #                           dtype=torch.bfloat16,
+                    #                           device=self.device)
+                    #print("\n\n\n block usage = ", block_usage)
+                    #attn_metadata.block_usage = block_usage
+                    
+                    #print("\n\n\n attn_metadata = ", attn_metadata)
                     #print("\n\n\n result.attn_metadata = ", result.attn_metadata)
-                    print("\n\n\n input hpu = ", output)
+                    #print("\n\n\n input hpu = ", output)
                     #print("\n input cpu = ", result.input_tokens)
-                    print("\n\n\n input positions hpu = ", position_ids)
+                    #print("\n\n\n input positions hpu = ", position_ids)
                     #print("\n input positions cpu = ", result.input_positions)
-                    print("\n\n\n model input = " , model_input, "\n\n\n")
+                    #print("\n\n\n model input = " , model_input, "\n\n\n")
                     
                     execute_model_kwargs.update({"input_ids": output,
                                                  "positions": position_ids,
