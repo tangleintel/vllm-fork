@@ -1003,25 +1003,18 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         num_decode_tokens = sum(seq_lens)
 
-        blocks_used = [len(bt) for bt in block_tables if bt]
-        block_list = []
+        block_list = list(itertools.chain(*block_tables))
+
         block_scales = []
         for i, bt in enumerate(block_tables):
-            block_list.extend(bt)
             blocks_in_group = len(bt)
             if blocks_in_group > 0:
                 scale = 1.0 / blocks_in_group
                 block_scales.extend([scale] * blocks_in_group)
 
-        block_mapping_nested: List[List[int]] = [
-            [i] * b_u for i, b_u in enumerate(blocks_used)
-        ]
-        block_mapping: List[int] = list(
-            itertools.chain.from_iterable(block_mapping_nested))
-
         max_idx = max(block_list)
         max_blocks = max(max_idx + 1, len(block_list))
-        block_bucket_size = find_bucket(max_blocks, self.decode_block_bucket_cfg)
+        block_bucket_size = find_bucket(max_blocks, self.bucketing_global_state.decode_block_bucket_cfg)
         block_bucket_size = min(block_bucket_size, self.cache_config.num_gpu_blocks)
 
         block_mapping = [None] * block_bucket_size
@@ -1038,9 +1031,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 block_usage[bt[-1]] = sl[-1] % self.block_size + 1
         block_usage = [u if u is not None else 0 for u in block_usage]                
 
-        block_bucket_size = find_bucket(
-            len(block_list),
-            self.bucketing_global_state.decode_block_bucket_cfg)
         block_list = pad_list(block_list, block_bucket_size, _PAD_BLOCK_ID)
         block_groups = pad_list(block_mapping, block_bucket_size,
                                 len(block_tables))
