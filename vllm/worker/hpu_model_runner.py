@@ -950,6 +950,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         lora_prompt_mapping: List[List[int]] = []
         lora_requests: Set[LoRARequest] = set()
 
+        # import pdb; pdb.set_trace()
+        # if len(seq_group_metadata_list) > 0:
+        #     print()
+        #     print(f"block_tables: {seq_group_metadata_list[0].block_tables}")
+        #     print()
+        # import pdb; pdb.set_trace()
+        # from vllm import debugger; debugger.set_trace()
+
         if len(seq_group_metadata_list) == 0:
             return PrepareDecodeMetadata.empty()
         lora_ids: List[int] = []
@@ -982,6 +990,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 seq_lens.append(seq_len)
 
                 block_table = seq_group_metadata.block_tables[seq_id]
+                num_fully_occupied_blocks = position // self.block_size
+                block_table = block_table[:num_fully_occupied_blocks + 1]
+
                 if len(block_table) == 0:
                     block_number = _PAD_BLOCK_ID
                 else:
@@ -1055,6 +1066,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         block_usage = torch.tensor(block_usage,
                                    dtype=self.model_config.dtype,
                                    device=self.device)
+        # print("PREPARE DECODE")
+        # print(f"block_usage: {block_usage}")
+        # print(f"block_mapping: {block_mapping}")
+        # print("/PREPARE DECODE")
 
         slot_mapping = torch.tensor(slot_mapping,
                                     dtype=torch.long,
@@ -1989,6 +2004,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 sampling_metadata.skip_sampler_cpu_output = True
                 self.model.model.sampler.include_gpu_probs_tensor = True
             for i in range(num_steps):
+                if not is_prompt:
+                #     import pdb; pdb.set_trace()
+                    from vllm import debugger; debugger.set_trace()
                 with self.profiler.record_event('internal', model_event_name):
                     hidden_states = self.model.forward(
                         **execute_model_kwargs,
@@ -2033,7 +2051,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         self.cached_step_outputs.append(output)
                 htorch.core.mark_step()
                 if i < num_steps - 1:
-                    output_cpu = tuple(output.cpu().numpy().flatten())
                     if i == 0:
                         import copy
                         ctx = model_input.async_callback.keywords["ctx"]
@@ -2043,13 +2060,26 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         for data in seq_group_metadata.seq_data.values():
                             max_output_len = sampling_metadata.seq_groups[0].sampling_params.max_tokens
                             if len(data.output_token_ids) < max_output_len - 1:
+                                output_cpu = tuple(output.cpu().numpy().flatten())
                                 data.output_token_ids += (output_cpu[j:j+1])  # tu się dodają tokeny
                                 data.update_num_computed_tokens(1)
+                                # print()
+                                # print(f"positions: {execute_model_kwargs['positions']}")
+                                # print(f"i: {i}")
+                                # print(f"output_cpu: {output_cpu}")
+                            else:
+                                if num_steps == 1:
+                                    return [output]
+                                else:
+                                    return []
                     result = self._prepare_decode(seq_group_metadata_list)
                     execute_model_kwargs.update({"input_ids": result.input_tokens,
                                                 #  "positions": execute_model_kwargs['positions'] + 1, # this way we have errors on 1024 queries and num steps 8 for some reason...
                                                  "positions": result.input_positions,
                                                  "attn_metadata": self.trim_attn_metadata(result.attn_metadata)})
+                    # print(execute_model_kwargs['attn_metadata'].block_usage)
+                    # print(execute_model_kwargs['attn_metadata'].block_mapping)
+                    # print()
             if self.is_driver_worker and self.profiler.enabled:
                 # Stop recording 'execute_model' event
                 self.profiler.end()
