@@ -38,7 +38,21 @@ while getopts "m:b:l:f:t:" OPT; do
   esac
 done
 
-lm_eval --model vllm \
-  --model_args pretrained=$MODEL,tensor_parallel_size=$TP_SIZE,distributed_executor_backend="ray",trust_remote_code=true,max_model_len=4096,dtype=bfloat16,num_concurrent=16,max_retries=3,tokenized_requests=False \
-  --tasks mmlu \
-  --batch_size $BATCH_SIZE --verbosity DEBUG --log_samples
+export MODEL_NAME="meta-llama/Meta-Llama-3-8B"
+
+python3 -m vllm.entrypoints.openai.api_server \
+        --model $MODEL_NAME \
+        --gpu-memory-utilization 0.95 \
+        --tensor-parallel-size  1   \
+        --dtype bfloat16 \
+        --kv-cache-dtype auto \
+        --swap-space  32  \
+        --max-num-seqs 128 \
+        --block-size 128 \
+        --host 0.0.0.0 \
+        --port  9915 &
+
+lm_eval --model local-completions \
+    --tasks mmlu \
+    --model_args model=meta-llama/Meta-Llama-3-8B,base_url=http://localhost:9915/v1/completions,num_concurrent=16,max_retries=3,tokenized_requests=False \
+  --verbosity DEBUG --log_samples
