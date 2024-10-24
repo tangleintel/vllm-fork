@@ -38,10 +38,8 @@ while getopts "m:b:l:f:t:" OPT; do
   esac
 done
 
-export MODEL_NAME="meta-llama/Meta-Llama-3-8B"
-
 python3 -m vllm.entrypoints.openai.api_server \
-        --model $MODEL_NAME \
+        --model $MODEL \
         --gpu-memory-utilization 0.95 \
         --tensor-parallel-size  1   \
         --dtype bfloat16 \
@@ -52,7 +50,9 @@ python3 -m vllm.entrypoints.openai.api_server \
         --host 0.0.0.0 \
         --port  9915 &
 
+sleep 1m
+
 lm_eval --model local-completions \
     --tasks mmlu \
-    --model_args model=meta-llama/Meta-Llama-3-8B,base_url=http://localhost:9915/v1/completions,num_concurrent=16,max_retries=3,tokenized_requests=False \
+    --model_args model=$MODEL,base_url=http://localhost:9915/v1/completions,num_concurrent=16,max_retries=3,tokenized_requests=False \
   --verbosity DEBUG --log_samples
