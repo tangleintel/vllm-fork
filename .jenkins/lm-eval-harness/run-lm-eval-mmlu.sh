@@ -39,7 +39,7 @@ while getopts "m:b:l:f:t:" OPT; do
 done
 
 python3 -m vllm.entrypoints.openai.api_server \
-        --model $MODEL \
+        --model /mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct \
         --gpu-memory-utilization 0.95 \
         --tensor-parallel-size  1   \
         --dtype bfloat16 \
@@ -54,5 +54,5 @@ sleep 1m
 
 lm_eval --model local-completions \
     --tasks mmlu \
-    --model_args model=$MODEL,base_url=http://localhost:9915/v1/completions,num_concurrent=16,max_retries=3,tokenized_requests=False \
+    --model_args model=/mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct,base_url=http://localhost:9915/v1/completions,num_concurrent=16,max_retries=3,tokenized_requests=False \
   --verbosity DEBUG --log_samples
