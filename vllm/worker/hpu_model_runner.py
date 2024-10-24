@@ -2063,19 +2063,203 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         for data in seq_group_metadata.seq_data.values():
                             max_output_len = sampling_metadata.seq_groups[0].sampling_params.max_tokens
                             if len(data.output_token_ids) < max_output_len - 1:
-                                output_cpu = tuple(output.cpu().numpy().flatten())
-                                data.output_token_ids += (output_cpu[j:j+1])  # tu się dodają tokeny
-                                data.update_num_computed_tokens(1)
-                                # print()
-                                # print(f"positions: {execute_model_kwargs['positions']}")
-                                # print(f"i: {i}")
-                                # print(f"output_cpu: {output_cpu}")
+                                # pass
+                                # import pdb; pdb.set_trace()
+                                # output_cpu = tuple(output.cpu().numpy().flatten())
+                                dummy_token = (540,)
+                                data.output_token_ids += (dummy_token)  # tu się dodają tokeny
+                                # data.output_token_ids += (output_cpu[j:j+1])  # tu się dodają tokeny
+                                # data.update_num_computed_tokens(1)
                             else:
                                 if num_steps == 1:
                                     return [output]
                                 else:
                                     return []
-                    result = self._prepare_decode(seq_group_metadata_list)
+                    #############################################################
+                    # input_tokens: List[List[int]] = []
+                    input_positions: List[List[int]] = []
+                    slot_mapping: List[List[int]] = []
+                    seq_lens: List[int] = []
+                    block_tables: List[List[int]] = []
+                    lora_index_mapping: List[List[int]] = []
+                    lora_prompt_mapping: List[List[int]] = []
+                    lora_requests: Set[LoRARequest] = set()
+
+                    # import pdb; pdb.set_trace()
+                    # if len(seq_group_metadata_list) > 0:
+                    #     print()
+                    #     print(f"block_tables: {seq_group_metadata_list[0].block_tables}")
+                    #     print()
+                    # import pdb; pdb.set_trace()
+                    # from vllm import debugger; debugger.set_trace()
+
+                    if len(seq_group_metadata_list) == 0:
+                        return PrepareDecodeMetadata.empty()
+                    lora_ids: List[int] = []
+
+                    dummy_slots = itertools.cycle(
+                        range(_PAD_SLOT_ID, _PAD_SLOT_ID + self.block_size))
+
+                    for seq_group_metadata in seq_group_metadata_list:
+                        assert not seq_group_metadata.is_prompt
+                        assert seq_group_metadata.token_chunk_size == 1
+
+                        seq_ids = list(seq_group_metadata.seq_data.keys())
+                        lora_id = seq_group_metadata.lora_int_id
+                        lora_ids.append(lora_id)
+
+                        if lora_id > 0:
+                            lora_requests.add(seq_group_metadata.lora_request)
+
+                        for seq_id in seq_ids:
+                            seq_data = seq_group_metadata.seq_data[seq_id]
+                            # print()
+                            # print()
+                            # print(seq_data)
+                            # print()
+                            # print()
+                            # import pdb; pdb.set_trace()
+                            # generation_token = seq_data.get_last_token_id()
+                            # import pdb; pdb.set_trace()
+                            # input_tokens.append([generation_token])
+
+                            seq_len = seq_data.get_len()
+                            position = seq_len - 1
+                            input_positions.append([position])
+
+                            seq_len = seq_len if self.sliding_window is None else min(
+                                seq_len, self.sliding_window)
+                            seq_lens.append(seq_len)
+
+                            block_table = seq_group_metadata.block_tables[seq_id]
+                            num_fully_occupied_blocks = position // self.block_size
+                            block_table = block_table[:num_fully_occupied_blocks + 1]
+
+                            if len(block_table) == 0:
+                                block_number = _PAD_BLOCK_ID
+                            else:
+                                block_number = block_table[position // self.block_size]
+                            if block_number == _PAD_BLOCK_ID:
+                                slot = next(dummy_slots)
+                            else:
+                                block_offset = position % self.block_size
+                                slot = block_number * self.block_size + block_offset
+                            slot_mapping.append([slot])
+                            lora_index_mapping.append(lora_id)
+                            lora_prompt_mapping.append(lora_id)
+
+                            if self.sliding_window is not None:
+                                sliding_window_blocks = (self.sliding_window //
+                                                        self.block_size)
+                                block_table = block_table[-sliding_window_blocks:]
+                            block_tables.append(block_table)
+
+                    # import pdb; pdb.set_trace()
+                    # input_tokens = torch.tensor(input_tokens,
+                    #                             dtype=torch.long,
+                    #                             device=self.device)
+                    input_tokens = output[:len(seq_group_metadata_list)]
+                    input_positions = torch.tensor(input_positions,
+                                                dtype=torch.long,
+                                                device=self.device)
+                    # print()
+                    # print(f"input_positions: {input_positions}")
+                    # print()
+                    # print(f"output: {output}")
+                    # print()
+                    # print(f"inp shape: {input_tokens.shape}")
+                    # print(f"out shape: {output.shape}")
+                    # print()
+                    # if input_tokens.shape != output[:len(seq_group_metadata_list)].shape:
+                    #     # import pdb; pdb.set_trace()
+                    #     print()
+                    #     print(f"inp: {input_tokens}")
+                    #     print(f"out: {output}")
+                    #     print()
+                    # input_positions = execute_model_kwargs['positions']+1
+
+                    num_decode_tokens = sum(seq_lens)
+
+                    blocks_used = [len(bt) for bt in block_tables if bt]
+                    block_list = []
+                    block_scales = []
+                    for i, bt in enumerate(block_tables):
+                        block_list.extend(bt)
+                        blocks_in_group = len(bt)
+                        if blocks_in_group > 0:
+                            scale = 1.0 / blocks_in_group
+                            block_scales.extend([scale] * blocks_in_group)
+
+                    block_mapping_nested: List[List[int]] = [
+                        [i] * b_u for i, b_u in enumerate(blocks_used)
+                    ]
+                    block_mapping: List[int] = list(
+                        itertools.chain.from_iterable(block_mapping_nested))
+
+                    last_block = [
+                        sl % self.block_size + 1 for sl in itertools.chain(*slot_mapping)
+                    ]
+                    block_usage = [[self.block_size] * (b_u - 1) + [lb]
+                                for b_u, lb in zip(blocks_used, last_block)]
+                    block_usage = list(itertools.chain(*block_usage))
+
+                    block_bucket_size = find_bucket(
+                        len(block_list),
+                        self.bucketing_global_state.decode_block_bucket_cfg)
+                    block_list = pad_list(block_list, block_bucket_size, _PAD_BLOCK_ID)
+                    block_mapping = pad_list(block_mapping, block_bucket_size, -1)
+                    block_usage = pad_list(block_usage, block_bucket_size, 1)
+                    block_scales = pad_list(block_scales, block_bucket_size, 0.0)
+
+                    block_list = torch.tensor(block_list,
+                                            dtype=torch.int,
+                                            device=self.device)
+                    block_mapping = torch.tensor(block_mapping,
+                                                dtype=torch.long,
+                                                device=self.device)
+                    block_usage = torch.tensor(block_usage,
+                                            dtype=self.model_config.dtype,
+                                            device=self.device)
+                    # print("PREPARE DECODE")
+                    # print(f"block_usage: {block_usage}")
+                    # print(f"block_mapping: {block_mapping}")
+                    # print("/PREPARE DECODE")
+
+                    slot_mapping = torch.tensor(slot_mapping,
+                                                dtype=torch.long,
+                                                device=self.device)
+
+                    block_indices, block_offsets = precompute_indices_and_offsets(
+                        self.block_size, slot_mapping, False)
+                    block_scales = torch.tensor(block_scales,
+                                                dtype=self.model_config.dtype,
+                                                device=self.device)
+
+                    attn_metadata = self.attn_backend.make_metadata(
+                        is_prompt=False,
+                        block_list=block_list,
+                        block_mapping=block_mapping,
+                        block_usage=block_usage,
+                        block_indices=block_indices,
+                        block_offsets=block_offsets,
+                        block_scales=block_scales,
+                        attn_bias=None,
+                        seq_lens_tensor=None,
+                        num_prefills=0,
+                        num_prefill_tokens=0,
+                        num_decode_tokens=num_decode_tokens,
+                        slot_mapping=slot_mapping,
+                    )
+                    result = PrepareDecodeMetadata(input_tokens=input_tokens,
+                                                input_positions=input_positions,
+                                                attn_metadata=attn_metadata,
+                                                lora_index_mapping=lora_index_mapping,
+                                                lora_prompt_mapping=lora_prompt_mapping,
+                                                lora_requests=lora_requests,
+                                                slot_mapping=slot_mapping,
+                                                lora_ids=lora_ids)
+                    # result = self._prepare_decode(seq_group_metadata_list)
+                    #############################################################
                     execute_model_kwargs.update({"input_ids": result.input_tokens,
                                                 #  "positions": execute_model_kwargs['positions'] + 1, # this way we have errors on 1024 queries and num steps 8 for some reason...
                                                  "positions": result.input_positions,
@@ -2083,6 +2267,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     # print(execute_model_kwargs['attn_metadata'].block_usage)
                     # print(execute_model_kwargs['attn_metadata'].block_mapping)
                     # print()
+                    
+
             if self.is_driver_worker and self.profiler.enabled:
                 # Stop recording 'execute_model' event
                 self.profiler.end()
