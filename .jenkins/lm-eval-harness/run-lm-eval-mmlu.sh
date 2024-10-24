@@ -38,6 +38,7 @@ while getopts "m:b:l:f:t:" OPT; do
   esac
 done
 
+pip install lm-eval[api]
 export VLLM_SKIP_WARMUP=true
 python3 -m vllm.entrypoints.openai.api_server \
         --model /mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct \
