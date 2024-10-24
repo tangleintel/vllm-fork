@@ -1005,13 +1005,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         block_list = list(itertools.chain(*block_tables))
 
-        block_scales = []
-        for i, bt in enumerate(block_tables):
-            blocks_in_group = len(bt)
-            if blocks_in_group > 0:
-                scale = 1.0 / blocks_in_group
-                block_scales.extend([scale] * blocks_in_group)
-
         max_idx = max(block_list)
         max_blocks = max(max_idx + 1, len(block_list))
         block_bucket_size = find_bucket(max_blocks, self.bucketing_global_state.decode_block_bucket_cfg)
@@ -1019,25 +1012,30 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         block_mapping = [None] * block_bucket_size
         block_usage = [None] * block_bucket_size
+        block_scales = [None] * block_bucket_size
+
         for i, bt in enumerate(block_tables):
-            for b in bt:
-                if block_mapping[b] is None:
-                    block_mapping[b] = i
-                    block_usage[b] = self.block_size
+            if bt:
+                blocks_in_group = len(bt)
+                scale = 1.0 / blocks_in_group
+                for b in bt:
+                    if block_mapping[b] is None:
+                        block_mapping[b] = i
+                        block_usage[b] = self.block_size
+                        block_scales[b] = scale
+
         block_mapping = [b if b is not None else -1 for b in block_mapping]
+        block_scales = [b if b is not None else 0.0 for b in block_scales]
 
         for bt, sl in zip(block_tables, slot_mapping):
             if bt:
                 block_usage[bt[-1]] = sl[-1] % self.block_size + 1
-        block_usage = [u if u is not None else 0 for u in block_usage]                
+        block_usage = [u if u is not None else 1 for u in block_usage]                
 
         block_list = pad_list(block_list, block_bucket_size, _PAD_BLOCK_ID)
         block_groups = pad_list(block_mapping, block_bucket_size,
                                 len(block_tables))
-        block_mapping = pad_list(block_mapping, block_bucket_size, -1)
-        block_usage = pad_list(block_usage, block_bucket_size, 1)
-        block_scales = pad_list(block_scales, block_bucket_size, 0.0)
-
+        
         block_list = torch.tensor(block_list,
                                   dtype=torch.int,
                                   device=self.device)
