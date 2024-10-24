@@ -40,6 +40,8 @@ done
 
 pip install lm-eval[api]
 export VLLM_SKIP_WARMUP=true
+export LOG_LEVEL_ALL=3
+export ENABLE_CONSOLE=true
 python3 -m vllm.entrypoints.openai.api_server \
         --model /mnt/weka/data/pytorch/llama3.1/Meta-Llama-3.1-8B-Instruct \
         --gpu-memory-utilization 0.95 \
