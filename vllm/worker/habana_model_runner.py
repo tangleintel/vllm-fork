@@ -1917,6 +1917,7 @@ class HabanaModelRunner(
                                         device=seq_data.prev_logits.device)])
                                 logits_ids_list = [seq_data.prev_logits_idx]
                                 logits_tensor = seq_data.prev_logits
+                            device = seq_data.prev_logits.device
                         else:
                             # warmup only, TODO add a check
                             logits_tensor_list.append(
@@ -1925,7 +1926,7 @@ class HabanaModelRunner(
                                             device="hpu"))
             if logits_tensor is not None:
                 logits_tensor_list.append(logits_tensor[torch.tensor(
-                    logits_ids_list, device=seq_data.prev_logits.device)])
+                    logits_ids_list, device=device)])
 
             prev_logits = torch.cat(logits_tensor_list, dim=0)
 
