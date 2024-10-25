@@ -1918,16 +1918,23 @@ class HabanaModelRunner(
                                 logits_ids_list = [seq_data.prev_logits_idx]
                                 logits_tensor = seq_data.prev_logits
                             device = seq_data.prev_logits.device
+                            length = seq_data.prev_logits.shape[1]
                         else:
-                            # warmup only, TODO add a check
-                            logits_tensor_list.append(
-                                torch.zeros([1, 32000],
+                            if warmup:
+                                # warmup only, TODO add a check
+                                logits_tensor_list.append(
+                                    torch.zeros([1, 32000],
+                                                dtype=torch.float,
+                                                device="hpu"))
+                            else:
+                                logits_tensor_list.append(
+                                torch.zeros([1, length],
                                             dtype=torch.float,
                                             device="hpu"))
             if logits_tensor is not None:
                 logits_tensor_list.append(logits_tensor[torch.tensor(
                     logits_ids_list, device=device)])
-
+            import pdb;set_trace()
             prev_logits = torch.cat(logits_tensor_list, dim=0)
 
             with self.profiler.record_event(
