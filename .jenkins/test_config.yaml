@@ -25,5 +25,5 @@ stages:
   - name: test_mmlu_llama3
     steps:
       - name: mmlu_llama3
-        flavor: g3.s
+        flavor: g2.s
         command: cd .jenkins/lm-eval-harness && bash run-lm-eval-mmlu.sh -m Meta-Llama-3-8B-Instruct.yaml -t 1
