@@ -950,14 +950,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         lora_prompt_mapping: List[List[int]] = []
         lora_requests: Set[LoRARequest] = set()
 
-        # import pdb; pdb.set_trace()
-        # if len(seq_group_metadata_list) > 0:
-        #     print()
-        #     print(f"block_tables: {seq_group_metadata_list[0].block_tables}")
-        #     print()
-        # import pdb; pdb.set_trace()
-        # from vllm import debugger; debugger.set_trace()
-
         if len(seq_group_metadata_list) == 0:
             return PrepareDecodeMetadata.empty()
         lora_ids: List[int] = []
@@ -1066,10 +1058,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         block_usage = torch.tensor(block_usage,
                                    dtype=self.model_config.dtype,
                                    device=self.device)
-        # print("PREPARE DECODE")
-        # print(f"block_usage: {block_usage}")
-        # print(f"block_mapping: {block_mapping}")
-        # print("/PREPARE DECODE")
 
         slot_mapping = torch.tensor(slot_mapping,
                                     dtype=torch.long,
@@ -1942,12 +1930,12 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
         if not model_input.is_first_multi_step:
             if not model_input.is_last_step:
-                # print("not first or last multistep")
+                # not first or last multi-step
                 return []
-            # print("last step")
+            # last multi-step)
             output = self._decode_sampler_outputs(model_input)
         if model_input.is_first_multi_step:
-            # print("first step")
+            # first multi-step
             if self.lora_config:
                 assert model_input.lora_requests is not None
                 assert model_input.lora_mapping is not None
@@ -2057,20 +2045,13 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         for data in seq_group_metadata.seq_data.values():
                             max_output_len = sampling_metadata.seq_groups[0].sampling_params.max_tokens
                             if len(data.output_token_ids) < max_output_len - 1:
-                                # pass
-                                # import pdb; pdb.set_trace()
-                                # output_cpu = tuple(output.cpu().numpy().flatten())
                                 dummy_token = (540,)
-                                data.output_token_ids += (dummy_token)  # tu się dodają tokeny
-                                # data.output_token_ids += (output_cpu[j:j+1])  # tu się dodają tokeny
-                                # data.update_num_computed_tokens(1)
+                                data.output_token_ids += (dummy_token)
                             else:
                                 if num_steps == 1:
                                     return [output]
                                 else:
                                     return []
-                    #############################################################
-                    # input_tokens: List[List[int]] = []
                     input_positions: List[List[int]] = []
                     slot_mapping: List[List[int]] = []
                     seq_lens: List[int] = []
@@ -2078,14 +2059,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     lora_index_mapping: List[List[int]] = []
                     lora_prompt_mapping: List[List[int]] = []
                     lora_requests: Set[LoRARequest] = set()
-
-                    # import pdb; pdb.set_trace()
-                    # if len(seq_group_metadata_list) > 0:
-                    #     print()
-                    #     print(f"block_tables: {seq_group_metadata_list[0].block_tables}")
-                    #     print()
-                    # import pdb; pdb.set_trace()
-                    # from vllm import debugger; debugger.set_trace()
 
                     if len(seq_group_metadata_list) == 0:
                         return PrepareDecodeMetadata.empty()
@@ -2107,15 +2080,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
                         for seq_id in seq_ids:
                             seq_data = seq_group_metadata.seq_data[seq_id]
-                            # print()
-                            # print()
-                            # print(seq_data)
-                            # print()
-                            # print()
-                            # import pdb; pdb.set_trace()
-                            # generation_token = seq_data.get_last_token_id()
-                            # import pdb; pdb.set_trace()
-                            # input_tokens.append([generation_token])
 
                             seq_len = seq_data.get_len()
                             position = seq_len - 1
@@ -2148,29 +2112,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 block_table = block_table[-sliding_window_blocks:]
                             block_tables.append(block_table)
 
-                    # import pdb; pdb.set_trace()
-                    # input_tokens = torch.tensor(input_tokens,
-                    #                             dtype=torch.long,
-                    #                             device=self.device)
                     input_tokens = output[:len(seq_group_metadata_list)]
                     input_positions = torch.tensor(input_positions,
                                                 dtype=torch.long,
                                                 device=self.device)
-                    # print()
-                    # print(f"input_positions: {input_positions}")
-                    # print()
-                    # print(f"output: {output}")
-                    # print()
-                    # print(f"inp shape: {input_tokens.shape}")
-                    # print(f"out shape: {output.shape}")
-                    # print()
-                    # if input_tokens.shape != output[:len(seq_group_metadata_list)].shape:
-                    #     # import pdb; pdb.set_trace()
-                    #     print()
-                    #     print(f"inp: {input_tokens}")
-                    #     print(f"out: {output}")
-                    #     print()
-                    # input_positions = execute_model_kwargs['positions']+1
 
                     num_decode_tokens = sum(seq_lens)
 
@@ -2219,10 +2164,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     block_usage = torch.tensor(block_usage,
                                             dtype=self.model_config.dtype,
                                             device=self.device)
-                    # print("PREPARE DECODE")
-                    # print(f"block_usage: {block_usage}")
-                    # print(f"block_mapping: {block_mapping}")
-                    # print("/PREPARE DECODE")
 
                     slot_mapping = torch.tensor(slot_mapping,
                                                 dtype=torch.long,
@@ -2258,16 +2199,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                                 lora_requests=lora_requests,
                                                 slot_mapping=slot_mapping,
                                                 lora_ids=lora_ids)
-                    # result = self._prepare_decode(seq_group_metadata_list)
-                    #############################################################
+
                     execute_model_kwargs.update({"input_ids": result.input_tokens,
-                                                #  "positions": execute_model_kwargs['positions'] + 1, # this way we have errors on 1024 queries and num steps 8 for some reason...
                                                  "positions": result.input_positions,
                                                  "attn_metadata": self.trim_attn_metadata(result.attn_metadata)})
-                    # print(execute_model_kwargs['attn_metadata'].block_usage)
-                    # print(execute_model_kwargs['attn_metadata'].block_mapping)
-                    # print()
-                    
 
             if self.is_driver_worker and self.profiler.enabled:
                 # Stop recording 'execute_model' event
@@ -2308,8 +2243,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     scheduler_outputs=ctx.scheduler_outputs,
                     is_async=False,
                     is_last_step=False,
-                    is_first_step_output=False)  # nie wiem co to robi
-                    # is_first_step_output=i == 0)
+                    is_first_step_output=False)
                 model_input.async_callback()
 
         if use_async_out_proc:

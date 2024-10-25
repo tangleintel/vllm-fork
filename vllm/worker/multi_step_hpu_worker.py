@@ -33,8 +33,6 @@ class MultiStepHPUWorker(HPUWorker):
                 execute_model_req=execute_model_req)
             worker_input = dataclasses.replace(
                 worker_input,
-                # num_steps=4)
-                # TODO: not sure if this is correct
                 num_steps=execute_model_req.num_lookahead_slots + 1)
             model_input: ModelInputForHPU = (
                 self.model_runner.prepare_model_input(
