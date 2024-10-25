@@ -2004,9 +2004,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 sampling_metadata.skip_sampler_cpu_output = True
                 self.model.model.sampler.include_gpu_probs_tensor = True
             for i in range(num_steps):
-                if not is_prompt:
+                # if not is_prompt:
                 #     import pdb; pdb.set_trace()
-                    from vllm import debugger; debugger.set_trace()
+                    # from vllm import debugger; debugger.set_trace()
                 with self.profiler.record_event('internal', model_event_name):
                     hidden_states = self.model.forward(
                         **execute_model_kwargs,
@@ -2204,6 +2204,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         len(block_list),
                         self.bucketing_global_state.decode_block_bucket_cfg)
                     block_list = pad_list(block_list, block_bucket_size, _PAD_BLOCK_ID)
+                    block_groups = pad_list(block_mapping, block_bucket_size,
+                                len(block_tables))
                     block_mapping = pad_list(block_mapping, block_bucket_size, -1)
                     block_usage = pad_list(block_usage, block_bucket_size, 1)
                     block_scales = pad_list(block_scales, block_bucket_size, 0.0)
@@ -2212,6 +2214,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                             dtype=torch.int,
                                             device=self.device)
                     block_mapping = torch.tensor(block_mapping,
+                                                dtype=torch.long,
+                                                device=self.device)
+                    block_groups = torch.tensor(block_groups,
                                                 dtype=torch.long,
                                                 device=self.device)
                     block_usage = torch.tensor(block_usage,
@@ -2240,6 +2245,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         block_indices=block_indices,
                         block_offsets=block_offsets,
                         block_scales=block_scales,
+                        block_groups=block_groups,
                         attn_bias=None,
                         seq_lens_tensor=None,
                         num_prefills=0,
