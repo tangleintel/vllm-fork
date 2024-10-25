@@ -62,8 +62,8 @@ class HPUExecutor(ExecutorBase):
             class_name = "HPUWorker"
 
         wrapper = WorkerWrapperBase(
-            worker_module_name = module_name,
-            worker_class_name = class_name,
+            worker_module_name=module_name,
+            worker_class_name=class_name,
         )
         wrapper.init_worker(**self._get_worker_kwargs(local_rank, rank,
                                                       distributed_init_method))

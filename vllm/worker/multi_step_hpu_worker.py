@@ -9,6 +9,7 @@ from vllm.worker.hpu_model_runner import ModelInputForHPU
 from vllm.worker.hpu_worker import HPUWorker
 from vllm.worker.worker_base import WorkerInput
 
+
 class MultiStepHPUWorker(HPUWorker):
 
     def __init__(self, *args, **kwargs):

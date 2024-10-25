@@ -1940,7 +1940,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 assert model_input.lora_requests is not None
                 assert model_input.lora_mapping is not None
                 self.set_active_loras(model_input.lora_requests,
-                                    model_input.lora_mapping)
+                                      model_input.lora_mapping)
             input_tokens = model_input.input_tokens
             input_positions = model_input.input_positions
             attn_metadata = model_input.attn_metadata
@@ -1963,7 +1963,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             if self.lora_config:
                 assert model_input.lora_ids is not None
                 lora_mask, lora_logits_mask = self.create_lora_mask(
-                    input_tokens, model_input.lora_ids, attn_metadata.is_prompt)
+                    input_tokens, model_input.lora_ids,
+                    attn_metadata.is_prompt)
 
             execute_model_kwargs = {
                 "input_ids": input_tokens,
@@ -1975,7 +1976,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 **(model_input.multi_modal_kwargs or {}),
             }
             if htorch.utils.internal.is_lazy():
-                execute_model_kwargs.update({"bypass_hpu_graphs": not use_graphs})
+                execute_model_kwargs.update(
+                    {"bypass_hpu_graphs": not use_graphs})
 
             htorch.core.mark_step()
             if self.is_driver_worker:
@@ -1995,8 +1997,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 with self.profiler.record_event('internal', model_event_name):
                     hidden_states = self.model.forward(
                         **execute_model_kwargs,
-                        selected_token_indices=sampling_metadata.selected_token_indices
-                    )
+                        selected_token_indices=sampling_metadata.
+                        selected_token_indices)
 
                 if self.lora_config:
                     LoraMask.setLoraMask(
@@ -2005,15 +2007,16 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
                 # Compute the logits.
                 with self.profiler.record_event(
-                        'internal', ('compute_logits_'
-                                    f'{"prompt" if is_prompt else "decode"}_bs'
-                                    f'{batch_size}_'
-                                    f'seq{seq_len}')):
+                        'internal',
+                    ('compute_logits_'
+                     f'{"prompt" if is_prompt else "decode"}_bs'
+                     f'{batch_size}_'
+                     f'seq{seq_len}')):
                     # TODO: maybe this condition doesn't make sense, need to understand if it's necessary
                     if num_steps == 1:
                         sampling_metadata.selected_token_indices = None
                     logits = self.model.compute_logits(hidden_states,
-                                                    sampling_metadata)
+                                                       sampling_metadata)
                 htorch.core.mark_step()
                 # Only perform sampling in the driver worker.
                 if not self.is_driver_worker:
@@ -2024,9 +2027,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 # Sample the next token.
                 with self.profiler.record_event(
                         'internal', ('sample_'
-                                    f'{"prompt" if is_prompt else "decode"}_'
-                                    f'bs{batch_size}_'
-                                    f'seq{seq_len}')):
+                                     f'{"prompt" if is_prompt else "decode"}_'
+                                     f'bs{batch_size}_'
+                                     f'seq{seq_len}')):
                     output = self.model.sample(
                         logits=logits,
                         sampling_metadata=sampling_metadata,
@@ -2040,12 +2043,15 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         import copy
                         ctx = model_input.async_callback.keywords["ctx"]
                         seq_group_metadata_list = ctx.seq_group_metadata_list
-                        seq_group_metadata_list = copy.deepcopy(seq_group_metadata_list)
-                    for j, seq_group_metadata in enumerate(seq_group_metadata_list):
+                        seq_group_metadata_list = copy.deepcopy(
+                            seq_group_metadata_list)
+                    for j, seq_group_metadata in enumerate(
+                            seq_group_metadata_list):
                         for data in seq_group_metadata.seq_data.values():
-                            max_output_len = sampling_metadata.seq_groups[0].sampling_params.max_tokens
+                            max_output_len = sampling_metadata.seq_groups[
+                                0].sampling_params.max_tokens
                             if len(data.output_token_ids) < max_output_len - 1:
-                                dummy_token = (540,)
+                                dummy_token = (540, )
                                 data.output_token_ids += (dummy_token)
                             else:
                                 if num_steps == 1:
@@ -2089,14 +2095,18 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                 seq_len, self.sliding_window)
                             seq_lens.append(seq_len)
 
-                            block_table = seq_group_metadata.block_tables[seq_id]
+                            block_table = seq_group_metadata.block_tables[
+                                seq_id]
                             num_fully_occupied_blocks = position // self.block_size
-                            block_table = block_table[:num_fully_occupied_blocks + 1]
+                            block_table = block_table[:
+                                                      num_fully_occupied_blocks
+                                                      + 1]
 
                             if len(block_table) == 0:
                                 block_number = _PAD_BLOCK_ID
                             else:
-                                block_number = block_table[position // self.block_size]
+                                block_number = block_table[position //
+                                                           self.block_size]
                             if block_number == _PAD_BLOCK_ID:
                                 slot = next(dummy_slots)
                             else:
@@ -2108,14 +2118,15 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
 
                             if self.sliding_window is not None:
                                 sliding_window_blocks = (self.sliding_window //
-                                                        self.block_size)
-                                block_table = block_table[-sliding_window_blocks:]
+                                                         self.block_size)
+                                block_table = block_table[
+                                    -sliding_window_blocks:]
                             block_tables.append(block_table)
 
                     input_tokens = output[:len(seq_group_metadata_list)]
                     input_positions = torch.tensor(input_positions,
-                                                dtype=torch.long,
-                                                device=self.device)
+                                                   dtype=torch.long,
+                                                   device=self.device)
 
                     num_decode_tokens = sum(seq_lens)
 
@@ -2136,34 +2147,38 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         itertools.chain.from_iterable(block_mapping_nested))
 
                     last_block = [
-                        sl % self.block_size + 1 for sl in itertools.chain(*slot_mapping)
+                        sl % self.block_size + 1
+                        for sl in itertools.chain(*slot_mapping)
                     ]
                     block_usage = [[self.block_size] * (b_u - 1) + [lb]
-                                for b_u, lb in zip(blocks_used, last_block)]
+                                   for b_u, lb in zip(blocks_used, last_block)]
                     block_usage = list(itertools.chain(*block_usage))
 
                     block_bucket_size = find_bucket(
                         len(block_list),
                         self.bucketing_global_state.decode_block_bucket_cfg)
-                    block_list = pad_list(block_list, block_bucket_size, _PAD_BLOCK_ID)
+                    block_list = pad_list(block_list, block_bucket_size,
+                                          _PAD_BLOCK_ID)
                     block_groups = pad_list(block_mapping, block_bucket_size,
-                                len(block_tables))
-                    block_mapping = pad_list(block_mapping, block_bucket_size, -1)
+                                            len(block_tables))
+                    block_mapping = pad_list(block_mapping, block_bucket_size,
+                                             -1)
                     block_usage = pad_list(block_usage, block_bucket_size, 1)
-                    block_scales = pad_list(block_scales, block_bucket_size, 0.0)
+                    block_scales = pad_list(block_scales, block_bucket_size,
+                                            0.0)
 
                     block_list = torch.tensor(block_list,
-                                            dtype=torch.int,
-                                            device=self.device)
+                                              dtype=torch.int,
+                                              device=self.device)
                     block_mapping = torch.tensor(block_mapping,
-                                                dtype=torch.long,
-                                                device=self.device)
+                                                 dtype=torch.long,
+                                                 device=self.device)
                     block_groups = torch.tensor(block_groups,
                                                 dtype=torch.long,
                                                 device=self.device)
                     block_usage = torch.tensor(block_usage,
-                                            dtype=self.model_config.dtype,
-                                            device=self.device)
+                                               dtype=self.model_config.dtype,
+                                               device=self.device)
 
                     slot_mapping = torch.tensor(slot_mapping,
                                                 dtype=torch.long,
@@ -2191,18 +2206,24 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                         num_decode_tokens=num_decode_tokens,
                         slot_mapping=slot_mapping,
                     )
-                    result = PrepareDecodeMetadata(input_tokens=input_tokens,
-                                                input_positions=input_positions,
-                                                attn_metadata=attn_metadata,
-                                                lora_index_mapping=lora_index_mapping,
-                                                lora_prompt_mapping=lora_prompt_mapping,
-                                                lora_requests=lora_requests,
-                                                slot_mapping=slot_mapping,
-                                                lora_ids=lora_ids)
+                    result = PrepareDecodeMetadata(
+                        input_tokens=input_tokens,
+                        input_positions=input_positions,
+                        attn_metadata=attn_metadata,
+                        lora_index_mapping=lora_index_mapping,
+                        lora_prompt_mapping=lora_prompt_mapping,
+                        lora_requests=lora_requests,
+                        slot_mapping=slot_mapping,
+                        lora_ids=lora_ids)
 
-                    execute_model_kwargs.update({"input_ids": result.input_tokens,
-                                                 "positions": result.input_positions,
-                                                 "attn_metadata": self.trim_attn_metadata(result.attn_metadata)})
+                    execute_model_kwargs.update({
+                        "input_ids":
+                        result.input_tokens,
+                        "positions":
+                        result.input_positions,
+                        "attn_metadata":
+                        self.trim_attn_metadata(result.attn_metadata)
+                    })
 
             if self.is_driver_worker and self.profiler.enabled:
                 # Stop recording 'execute_model' event
@@ -2229,8 +2250,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         for i in range(num_outputs):
             next_token_ids = self.cached_step_outputs.pop(0)
             next_token_ids = next_token_ids.cpu().tolist()
-            sampler_output = self._make_decode_output(next_token_ids,
-                                                      model_input.sampling_metadata.seq_groups)
+            sampler_output = self._make_decode_output(
+                next_token_ids, model_input.sampling_metadata.seq_groups)
             sampler_outputs.append(sampler_output)
 
             if i < num_outputs - 1 and use_async_out_proc:
@@ -2266,10 +2287,10 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 next_token_id = next_token_ids[batch_idx][0]
                 seq_outputs.append(
                     SequenceOutput(seq_id, next_token_id,
-                                {next_token_id: zero_logprob}))
+                                   {next_token_id: zero_logprob}))
                 batch_idx += 1
-            sampler_outputs.append(CompletionSequenceGroupOutput(
-                seq_outputs, None))
+            sampler_outputs.append(
+                CompletionSequenceGroupOutput(seq_outputs, None))
         return SamplerOutput(sampler_outputs)
 
     def shutdown_inc(self):
