@@ -228,6 +228,7 @@ class FusedMoE(torch.nn.Module):
         self.custom_routing_function = custom_routing_function
         if is_hpu:
             from vllm_hpu_extension.ops import DynamicFusedMOE, StaticFusedMOE
+
             from vllm.model_executor.layers.quantization.inc import INCConfig
             selected_fused_moe = (
                 StaticFusedMOE
