@@ -1007,8 +1007,12 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         max_idx = max(block_list)
         max_blocks = max(max_idx + 1, len(block_list))
-        block_bucket_size = find_bucket(max_blocks, self.bucketing_global_state.decode_block_bucket_cfg)
-        block_bucket_size = min(block_bucket_size, self.cache_config.num_gpu_blocks)
+        block_bucket_size = find_bucket(
+            max_blocks, self.bucketing_global_state.decode_block_bucket_cfg
+        )
+        block_bucket_size = min(
+            block_bucket_size, self.cache_config.num_gpu_blocks
+        )
 
         block_mapping = [None] * block_bucket_size
         block_usage = [None] * block_bucket_size
@@ -1030,7 +1034,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         for bt, sl in zip(block_tables, slot_mapping):
             if bt:
                 block_usage[bt[-1]] = sl[-1] % self.block_size + 1
-        block_usage = [u if u is not None else 1 for u in block_usage]                
+        block_usage = [u if u is not None else 1 for u in block_usage]
 
         block_list = pad_list(block_list, block_bucket_size, _PAD_BLOCK_ID)
         block_groups = pad_list(block_mapping, block_bucket_size,
