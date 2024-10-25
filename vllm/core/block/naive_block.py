@@ -1,4 +1,4 @@
-from collections import deque
+import heapq
 from typing import Deque, FrozenSet, Iterable, List, Optional, Tuple
 
 from vllm.core.block.common import (BlockPool, CopyOnWriteTracker, RefCounter,
@@ -6,7 +6,6 @@ from vllm.core.block.common import (BlockPool, CopyOnWriteTracker, RefCounter,
 from vllm.core.block.interfaces import Block, BlockAllocator, BlockId, Device
 
 Refcount = int
-import heapq
 
 
 class NaiveBlockAllocator(BlockAllocator):
