@@ -203,7 +203,7 @@ def generate_decode_buckets(bs_bucket_config, blocks_bucket_config,
     for bs in bs_buckets:
         for blocks in block_buckets:
             if blocks > last_bucket:
-                buckets.append((bs, last_bucket))    
+                buckets.append((bs, last_bucket))
                 break
             buckets.append((bs, blocks))
     return list(sorted(buckets, key=lambda b: (b[0] * b[1], b[1], b[0])))
@@ -1008,15 +1008,13 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         max_idx = max(block_list)
         max_blocks = max(max_idx + 1, len(block_list))
         block_bucket_size = find_bucket(
-            max_blocks, self.bucketing_global_state.decode_block_bucket_cfg
-        )
-        block_bucket_size = min(
-            block_bucket_size, self.cache_config.num_gpu_blocks
-        )
+            max_blocks, self.bucketing_global_state.decode_block_bucket_cfg)
+        block_bucket_size = min(block_bucket_size,
+                                self.cache_config.num_gpu_blocks)
 
-        block_mapping = [None] * block_bucket_size
-        block_usage = [None] * block_bucket_size
-        block_scales = [None] * block_bucket_size
+        block_mapping: List[Union[None, int]] = [None] * block_bucket_size
+        block_usage: List[Union[None, int]] = [None] * block_bucket_size
+        block_scales: List[Union[None, float]] = [None] * block_bucket_size
 
         for i, bt in enumerate(block_tables):
             if bt:
@@ -1039,7 +1037,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         block_list = pad_list(block_list, block_bucket_size, _PAD_BLOCK_ID)
         block_groups = pad_list(block_mapping, block_bucket_size,
                                 len(block_tables))
-        
         block_list = torch.tensor(block_list,
                                   dtype=torch.int,
                                   device=self.device)
