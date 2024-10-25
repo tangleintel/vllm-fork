@@ -230,11 +230,8 @@ class FusedMoE(torch.nn.Module):
             from vllm_hpu_extension.ops import DynamicFusedMOE, StaticFusedMOE
 
             from vllm.model_executor.layers.quantization.inc import INCConfig
-            selected_fused_moe = (
-                StaticFusedMOE
-                if isinstance(quant_config, INCConfig)
-                else DynamicFusedMOE
-            )
+            selected_fused_moe = (StaticFusedMOE if isinstance(
+                quant_config, INCConfig) else DynamicFusedMOE)
             self.hpu_static_fused_moe = selected_fused_moe(self.num_experts)
 
         if quant_config is None:
