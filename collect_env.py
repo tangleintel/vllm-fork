@@ -254,8 +254,8 @@ def get_nvidia_smi():
 
 
 def get_hpu_info():
-    command = ["hl-smi", "-q", "-d", "PRODUCT"]
     try:
+        command = ["hl-smi", "-q", "-d", "PRODUCT"]
         lines = subprocess.Popen(command, stdout=subprocess.PIPE, universal_newlines=True).stdout.readlines()
         lines = [l.strip('\t') for l in lines]
         hpu_count = None
@@ -283,7 +283,7 @@ def get_hpu_info():
         if hpu_model is None:
             return ('N/A', hpu_driver)
         return (f'{hpu_count}x {hpu_model}', hpu_driver)
-    except Exception as e:
+    except:
         return ('N/A', 'N/A')
 
 
