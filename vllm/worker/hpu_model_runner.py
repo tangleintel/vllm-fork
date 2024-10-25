@@ -2004,9 +2004,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 sampling_metadata.skip_sampler_cpu_output = True
                 self.model.model.sampler.include_gpu_probs_tensor = True
             for i in range(num_steps):
-                # if not is_prompt:
-                #     import pdb; pdb.set_trace()
-                    # from vllm import debugger; debugger.set_trace()
                 with self.profiler.record_event('internal', model_event_name):
                     hidden_states = self.model.forward(
                         **execute_model_kwargs,
