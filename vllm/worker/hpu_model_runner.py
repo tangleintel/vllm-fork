@@ -37,12 +37,13 @@ from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
 from vllm.model_executor import SamplingMetadata
 from vllm.model_executor.layers.sampler import SamplerOutput
 from vllm.model_executor.model_loader import get_model
+from vllm.model_executor.sampling_metadata import SequenceGroupToSample
 from vllm.multimodal import (MULTIMODAL_REGISTRY, BatchedTensorInputs,
                              MultiModalInputs)
 from vllm.sampling_params import SamplingParams
-from vllm.sequence import (IntermediateTensors, SequenceData, SequenceOutput,
-                           CompletionSequenceGroupOutput,
-                           SequenceGroupMetadata, Logprob)
+from vllm.sequence import (CompletionSequenceGroupOutput, IntermediateTensors,
+                           Logprob, SequenceData, SequenceGroupMetadata,
+                           SequenceOutput)
 from vllm.utils import (is_fake_hpu, is_pin_memory_available,
                         make_tensor_with_pad)
 from vllm.worker.model_runner_base import (
@@ -1939,7 +1940,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
             if not model_input.is_last_step:
                 # not first or last multi-step
                 return []
-            # last multi-step)
+            # last multi-step
             output = self._decode_sampler_outputs(model_input)
         if model_input.is_first_multi_step:
             # first multi-step
@@ -1995,9 +1996,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                     f"graphs{'T' if use_graphs else 'F'}")
             else:
                 model_event_name = 'model_executable'
-            # make sure we skip the sampler on the lask rank and only pythonize
-            # if CPU is ahead.
             if num_steps > 1:
+                # in case of multi-step scheduling
+                # we only want to pythonize in the last step
                 sampling_metadata.skip_sampler_cpu_output = True
                 self.model.model.sampler.include_gpu_probs_tensor = True
             for i in range(num_steps):
@@ -2019,7 +2020,6 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                      f'{"prompt" if is_prompt else "decode"}_bs'
                      f'{batch_size}_'
                      f'seq{seq_len}')):
-                    # TODO: maybe this condition doesn't make sense, need to understand if it's necessary
                     if num_steps == 1:
                         sampling_metadata.selected_token_indices = None
                     logits = self.model.compute_logits(hidden_states,
@@ -2048,7 +2048,8 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                 if i < num_steps - 1:
                     if i == 0:
                         import copy
-                        ctx = model_input.async_callback.keywords["ctx"]
+                        ctx = model_input.async_callback.keywords[  # type: ignore
+                            "ctx"]
                         seq_group_metadata_list = ctx.seq_group_metadata_list
                         seq_group_metadata_list = copy.deepcopy(
                             seq_group_metadata_list)
@@ -2057,6 +2058,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                             max_output_len = sampling_metadata.seq_groups[
                                 0].sampling_params.max_tokens
                             if len(data.output_token_ids) < max_output_len - 1:
+                                # arbitrary value, this could be any token
                                 dummy_token = (540, )
                                 data.output_token_ids += (dummy_token)
                             else:
@@ -2064,8 +2066,9 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                                     return [output]
                                 else:
                                     return []
-                    
-                    result = self._prepare_decode(seq_group_metadata_list, output=output)
+
+                    result = self._prepare_decode(seq_group_metadata_list,
+                                                  output=output)
                     execute_model_kwargs.update({
                         "input_ids":
                         result.input_tokens,
@@ -2125,7 +2128,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
     def _make_decode_output(
         self,
         next_token_ids: List[List[int]],
-        seq_groups: List[List[int]],
+        seq_groups: List[SequenceGroupToSample],
     ) -> SamplerOutput:
         zero_logprob = Logprob(0.0)
         sampler_outputs = []
