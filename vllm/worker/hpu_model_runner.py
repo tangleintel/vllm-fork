@@ -2004,7 +2004,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
         warmup_mode=False,
     ) -> Optional[Union[List[SamplerOutput], IntermediateTensors]]:
         if not model_input.is_first_multi_step:
-            if not model_input.is_last_step:
+            if not model_input.is_last_step or not self.is_driver_worker:
                 # not first or last multi-step
                 return []
             # last multi-step
@@ -2092,58 +2092,59 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     logits = self.model.compute_logits(hidden_states,
                                                        sampling_metadata)
                 htorch.core.mark_step()
-                # Only perform sampling in the driver worker.
-                if not self.is_driver_worker:
-                    return []
+                # if not self.is_driver_worker:
+                #     continue
 
-                if model_input.async_callback is not None:
-                    model_input.async_callback()
-                # Sample the next token.
-                with self.profiler.record_event(
-                        'internal', ('sample_'
-                                     f'{"prompt" if is_prompt else "decode"}_'
-                                     f'bs{batch_size}_'
-                                     f'seq{seq_len}')):
-                    output = self.model.sample(
-                        logits=logits,
-                        sampling_metadata=sampling_metadata,
-                    )
-                    if num_steps > 1:
-                        output = output.sampled_token_ids
-                        self.cached_step_outputs.append(output)
-                htorch.core.mark_step()
+                if self.is_driver_worker:
+                    if model_input.async_callback is not None:
+                        model_input.async_callback()
+                    # Sample the next token.
+                    with self.profiler.record_event(
+                            'internal', ('sample_'
+                                        f'{"prompt" if is_prompt else "decode"}_'
+                                        f'bs{batch_size}_'
+                                        f'seq{seq_len}')):
+                        output = self.model.sample(
+                            logits=logits,
+                            sampling_metadata=sampling_metadata,
+                        )
+                        if num_steps > 1:
+                            output = output.sampled_token_ids
+                            self.cached_step_outputs.append(output)
+                    htorch.core.mark_step()
                 if i < num_steps - 1:
-                    if i == 0:
-                        import copy
-                        ctx = model_input.async_callback.keywords[  # type: ignore
-                            "ctx"]
-                        seq_group_metadata_list = ctx.seq_group_metadata_list
-                        seq_group_metadata_list = copy.deepcopy(
-                            seq_group_metadata_list)
-                    for seq_group_metadata in seq_group_metadata_list:
-                        for data in seq_group_metadata.seq_data.values():
-                            max_output_len = sampling_metadata.seq_groups[
-                                0].sampling_params.max_tokens
-                            if len(data.output_token_ids) < max_output_len - 1:
-                                # arbitrary value, this could be any token
-                                dummy_token = (540, )
-                                data.output_token_ids += (dummy_token)
-                            else:
-                                if num_steps == 1:
-                                    return [output]
+                    if self.is_driver_worker:
+                        if i == 0:
+                            import copy
+                            ctx = model_input.async_callback.keywords[  # type: ignore
+                                "ctx"]
+                            seq_group_metadata_list = ctx.seq_group_metadata_list
+                            seq_group_metadata_list = copy.deepcopy(
+                                seq_group_metadata_list)
+                        for seq_group_metadata in seq_group_metadata_list:
+                            for data in seq_group_metadata.seq_data.values():
+                                max_output_len = sampling_metadata.seq_groups[
+                                    0].sampling_params.max_tokens
+                                if len(data.output_token_ids) < max_output_len - 1:
+                                    # arbitrary value, this could be any token
+                                    dummy_token = (540, )
+                                    data.output_token_ids += (dummy_token)
                                 else:
-                                    return []
+                                    if num_steps == 1:
+                                        return [output]
+                                    else:
+                                        return []
 
-                    result = self._prepare_decode(seq_group_metadata_list,
-                                                  output=output)
-                    execute_model_kwargs.update({
-                        "input_ids":
-                        result.input_tokens,
-                        "positions":
-                        result.input_positions,
-                        "attn_metadata":
-                        self.trim_attn_metadata(result.attn_metadata)
-                    })
+                        result = self._prepare_decode(seq_group_metadata_list,
+                                                    output=output)
+                        execute_model_kwargs.update({
+                            "input_ids":
+                            result.input_tokens,
+                            "positions":
+                            result.input_positions,
+                            "attn_metadata":
+                            self.trim_attn_metadata(result.attn_metadata)
+                        })
 
             if self.is_driver_worker and self.profiler.enabled:
                 # Stop recording 'execute_model' event
@@ -2157,7 +2158,7 @@ class HPUModelRunner(HPUModelRunnerBase[ModelInputForHPUWithSamplingMetadata]):
                     real_batch_size=real_batch_size,
                     is_prompt=is_prompt)
                 self.profiler.record_counter(self.event_start, counters)
-            if num_steps == 1:
+            if num_steps == 1 and self.is_driver_worker:
                 return [output]
             else:
                 return []
