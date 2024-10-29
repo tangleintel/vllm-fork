@@ -1005,34 +1005,68 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         block_list = list(itertools.chain(*block_tables))
 
-        max_idx = max(block_list)
-        max_blocks = max(max_idx + 1, len(block_list))
-        block_bucket_size = find_bucket(
-            max_blocks, self.bucketing_global_state.decode_block_bucket_cfg)
-        block_bucket_size = min(block_bucket_size,
-                                self.cache_config.num_gpu_blocks)
+        if os.environ.get('VLLM_CONTIGUOUS_PA', 'false').lower() == 'true':
+            max_idx = max(block_list)
+            max_blocks = max(max_idx + 1, len(block_list))
+            block_bucket_size = find_bucket(
+                max_blocks,
+                self.bucketing_global_state.decode_block_bucket_cfg)
+            block_bucket_size = min(block_bucket_size,
+                                    self.cache_config.num_gpu_blocks)
 
-        block_mapping: List[Union[None, int]] = [None] * block_bucket_size
-        block_usage: List[Union[None, int]] = [None] * block_bucket_size
-        block_scales: List[Union[None, float]] = [None] * block_bucket_size
+            block_mapping: List[Union[None, int]] = [None] * block_bucket_size
+            block_usage: List[Union[None, int]] = [None] * block_bucket_size
+            block_scales: List[Union[None, float]] = [None] * block_bucket_size
 
-        for i, bt in enumerate(block_tables):
-            if bt:
+            for i, bt in enumerate(block_tables):
+                if bt:
+                    blocks_in_group = len(bt)
+                    scale = 1.0 / blocks_in_group
+                    for b in bt:
+                        if block_mapping[b] is None:
+                            block_mapping[b] = i
+                            block_usage[b] = self.block_size
+                            block_scales[b] = scale
+
+            block_mapping = [b if b is not None else -1 for b in block_mapping]
+            block_scales = [b if b is not None else 0.0 for b in block_scales]
+
+            for bt, sl in zip(block_tables, slot_mapping):
+                if bt:
+                    block_usage[bt[-1]] = sl[-1] % self.block_size + 1
+            block_usage = [u if u is not None else 1 for u in block_usage]
+
+        else:
+            blocks_used = [len(bt) for bt in block_tables if bt]
+            block_list = []
+            block_scales = []
+            for i, bt in enumerate(block_tables):
+                block_list.extend(bt)
                 blocks_in_group = len(bt)
-                scale = 1.0 / blocks_in_group
-                for b in bt:
-                    if block_mapping[b] is None:
-                        block_mapping[b] = i
-                        block_usage[b] = self.block_size
-                        block_scales[b] = scale
+                if blocks_in_group > 0:
+                    scale = 1.0 / blocks_in_group
+                    block_scales.extend([scale] * blocks_in_group)
 
-        block_mapping = [b if b is not None else -1 for b in block_mapping]
-        block_scales = [b if b is not None else 0.0 for b in block_scales]
+            block_mapping_nested: List[List[int]] = [
+                [i] * b_u for i, b_u in enumerate(blocks_used)
+            ]
+            block_mapping: List[int] = list(
+                itertools.chain.from_iterable(block_mapping_nested))
 
-        for bt, sl in zip(block_tables, slot_mapping):
-            if bt:
-                block_usage[bt[-1]] = sl[-1] % self.block_size + 1
-        block_usage = [u if u is not None else 1 for u in block_usage]
+            last_block = [
+                sl % self.block_size + 1
+                for sl in itertools.chain(*slot_mapping)
+            ]
+            block_usage = [[self.block_size] * (b_u - 1) + [lb]
+                           for b_u, lb in zip(blocks_used, last_block)]
+            block_usage = list(itertools.chain(*block_usage))
+
+            block_bucket_size = find_bucket(
+                len(block_list),
+                self.bucketing_global_state.decode_block_bucket_cfg)
+            block_mapping = pad_list(block_mapping, block_bucket_size, -1)
+            block_usage = pad_list(block_usage, block_bucket_size, 1)
+            block_scales = pad_list(block_scales, block_bucket_size, 0.0)
 
         block_list = pad_list(block_list, block_bucket_size, _PAD_BLOCK_ID)
         block_groups = pad_list(block_mapping, block_bucket_size,
