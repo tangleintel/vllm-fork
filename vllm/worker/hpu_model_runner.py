@@ -1087,6 +1087,10 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         num_decode_tokens = sum(seq_lens)
         block_list = list(itertools.chain(*block_tables))
+        
+        block_mapping: List[Optional[int]]
+        block_usage: List[Optional[int]]
+        block_scales: List[Optional[float]]
 
         if os.environ.get('VLLM_CONTIGUOUS_PA', 'false').lower() == 'true':
             max_idx = max(block_list)
@@ -1097,9 +1101,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_bucket_size = min(block_bucket_size,
                                     self.cache_config.num_gpu_blocks)
 
-            block_mapping: List[Union[None, int]] = [None] * block_bucket_size
-            block_usage: List[Union[None, int]] = [None] * block_bucket_size
-            block_scales: List[Union[None, float]] = [None] * block_bucket_size
+            block_mapping = [None] * block_bucket_size
+            block_usage = [None] * block_bucket_size
+            block_scales = [None] * block_bucket_size
 
             for i, bt in enumerate(block_tables):
                 if bt:
@@ -1133,7 +1137,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             block_mapping_nested: List[List[int]] = [
                 [i] * b_u for i, b_u in enumerate(blocks_used)
             ]
-            block_mapping: List[int] = list(
+            block_mapping = list(
                 itertools.chain.from_iterable(block_mapping_nested))
 
             last_block = [
