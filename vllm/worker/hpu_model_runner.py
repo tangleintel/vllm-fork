@@ -1041,28 +1041,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         num_decode_tokens = sum(seq_lens)
 
-        blocks_used = [len(bt) for bt in block_tables if bt]
-        block_list = []
-        block_scales = []
-        for bt in block_tables:
-            block_list.extend(bt)
-            blocks_in_group = len(bt)
-            if blocks_in_group > 0:
-                scale = 1.0 / blocks_in_group
-                block_scales.extend([scale] * blocks_in_group)
-
-        block_mapping_nested: List[List[int]] = [
-            [i] * b_u for i, b_u in enumerate(blocks_used)
-        ]
-        block_mapping: List[int] = list(
-            itertools.chain.from_iterable(block_mapping_nested))
-
-        last_block = [
-            sl % self.block_size + 1 for sl in itertools.chain(*slot_mapping)
-        ]
-        block_usage = [[self.block_size] * (b_u - 1) + [lb]
-                       for b_u, lb in zip(blocks_used, last_block)]
-        block_usage = list(itertools.chain(*block_usage))
+        block_list = list(itertools.chain(*block_tables))
 
         max_idx = max(block_list)
         max_blocks = max(max_idx + 1, len(block_list))
