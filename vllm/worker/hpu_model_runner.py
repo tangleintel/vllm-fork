@@ -1087,10 +1087,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
 
         num_decode_tokens = sum(seq_lens)
         block_list = list(itertools.chain(*block_tables))
-        
-        block_mapping: List[Optional[int]]
-        block_usage: List[Optional[int]]
-        block_scales: List[Optional[float]]
 
         if os.environ.get('VLLM_CONTIGUOUS_PA', 'false').lower() == 'true':
             max_idx = max(block_list)
