@@ -61,7 +61,7 @@ following:
 ``` {.console}
 $ git clone https://github.com/HabanaAI/vllm-fork.git
 $ cd vllm-fork
-$ git checkout habana_main
+$ git checkout v1.18.1
 $ pip install -e .
 ```
 
