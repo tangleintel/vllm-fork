@@ -25,6 +25,16 @@ class HPUExecutor(ExecutorBase):
 
     def _init_executor(self) -> None:
         """Initialize the worker and load the model."""
+        if (self.scheduler_config.num_scheduler_steps > 1
+                and self.parallel_config.tensor_parallel_size > 1):
+            raise ValueError(
+                "Multi-step scheduling is currently incompatible with TP > 1")
+        print()
+        print()
+        print(f"self.scheduler_config.num_scheduler_steps: {self.scheduler_config.num_scheduler_steps}")
+        print(f"self.parallel_config.tensor_parallel_size: {self.parallel_config.tensor_parallel_size}")
+        print()
+        print()
         self._init_worker()
 
     def _get_worker_kwargs(
