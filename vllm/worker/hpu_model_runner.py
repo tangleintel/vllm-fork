@@ -1146,7 +1146,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 for sl in itertools.chain(*slot_mapping)
             ]
             block_usage_ = [[self.block_size] * (b_u - 1) + [lb]
-                           for b_u, lb in zip(blocks_used, last_block)]
+                            for b_u, lb in zip(blocks_used, last_block)]
             block_usage = list(itertools.chain(*block_usage_))
 
             block_bucket_size = find_bucket(
