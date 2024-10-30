@@ -245,7 +245,6 @@ class GPTBigCodeModel(nn.Module):
             hidden_states = layer(hidden_states,
                                   kv_caches[i - self.start_layer],
                                   attn_metadata)
-            print("libin debug attn_metadata.hidden_layers ", attn_metadata.hidden_layers)
             if is_hpu and i % attn_metadata.hidden_layers == 0:
                 htorch.core.mark_step()
         if not get_pp_group().is_last_rank:
