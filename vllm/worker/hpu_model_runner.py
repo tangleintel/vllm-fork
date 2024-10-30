@@ -205,7 +205,7 @@ def generate_decode_buckets(bs_bucket_config, blocks_bucket_config,
     last_bucket = max_blocks
     for bs in bs_buckets:
         for blocks in block_buckets:
-            if blocks > last_bucket:
+            if blocks >= last_bucket:
                 buckets.append((bs, last_bucket))
                 break
             buckets.append((bs, blocks))
@@ -621,7 +621,8 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.bucketing_global_state = HPUBucketingGlobalState()
         self._setup_buckets()
         self._set_gc_threshold()
-
+        self.use_contiguous_pa = os.environ.get('VLLM_CONTIGUOUS_PA',
+                                                'false').lower() == 'true'
         # For multi-step scheduling
         self.cached_step_outputs: List[torch.Tensor] = []
 
@@ -1092,7 +1093,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         block_scales: Union[List[Union[None, float]], torch.Tensor]
         block_list: Union[List[int], torch.Tensor]
 
-        if os.environ.get('VLLM_CONTIGUOUS_PA', 'false').lower() == 'true':
+        if self.use_contiguous_pa:
             block_list = list(itertools.chain(*block_tables))
             max_idx = max(block_list)
             max_blocks = max(max_idx + 1, len(block_list))
