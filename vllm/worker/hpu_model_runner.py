@@ -1086,9 +1086,14 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                                        device=self.device)
 
         num_decode_tokens = sum(seq_lens)
-        block_list = list(itertools.chain(*block_tables))
+
+        block_mapping: Union[List[Union[None, int]], torch.Tensor]
+        block_usage: Union[List[Union[None, int]], torch.Tensor]
+        block_scales: Union[List[Union[None, float]], torch.Tensor]
+        block_list: Union[List[int], torch.Tensor]
 
         if os.environ.get('VLLM_CONTIGUOUS_PA', 'false').lower() == 'true':
+            block_list = list(itertools.chain(*block_tables))
             max_idx = max(block_list)
             max_blocks = max(max_idx + 1, len(block_list))
             block_bucket_size = find_bucket(
@@ -1140,9 +1145,9 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
                 sl % self.block_size + 1
                 for sl in itertools.chain(*slot_mapping)
             ]
-            block_usage = [[self.block_size] * (b_u - 1) + [lb]
+            block_usage_ = [[self.block_size] * (b_u - 1) + [lb]
                            for b_u, lb in zip(blocks_used, last_block)]
-            block_usage = list(itertools.chain(*block_usage))
+            block_usage = list(itertools.chain(*block_usage_))
 
             block_bucket_size = find_bucket(
                 len(block_list),
@@ -1166,7 +1171,6 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         block_usage = torch.tensor(block_usage,
                                    dtype=self.model_config.dtype,
                                    device=self.device)
-
         slot_mapping = torch.tensor(slot_mapping,
                                     dtype=torch.long,
                                     device=self.device)
