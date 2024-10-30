@@ -68,7 +68,7 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     is_prompt: bool
     attn_bias: Optional[torch.Tensor]
     seq_lens_tensor: Optional[torch.Tensor]
-    attn_steps: Optional[int]
+    hidden_layers: Optional[int]
 
 
 class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
@@ -99,7 +99,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         kv_cache_dtype: str,
         blocksparse_params: Optional[Dict[str, Any]] = None,
         max_seq_len: int = 4096,
-        attn_steps: Optional[int] = None,
+        hidden_layers: Optional[int] = None,
     ) -> None:
         super(AttentionImpl, self).__init__()
         self.kv_cache_dtype = kv_cache_dtype
@@ -127,7 +127,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         if self.prefill_usefusedsdpa:
             assert alibi_slopes is None, \
                 'Prefill with FusedSDPA not supported with alibi slopes!'
-        self.attn_steps = attn_steps
+        self.hidden_layers = hidden_layers
         suppored_head_sizes = HPUPagedAttention.get_supported_head_sizes()
         if head_size not in suppored_head_sizes:
             raise ValueError(

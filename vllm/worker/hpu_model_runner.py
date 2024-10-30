@@ -593,7 +593,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         self.lora_manager: LRUCacheWorkerLoRAManager = None
         self.model: torch.nn.Module = None
         self.inc_initialized_successfully = False
-        self.attn_steps = int(os.getenv('VLLM_GRAPH_ATTN_STEPS', '1'))
+        self.hidden_layers = int(os.getenv('VLLM_GRAPH_HIDDEN_LAYERS', '1'))
 
         # Profiler stats
         self.profiler = HabanaHighLevelProfiler()
@@ -944,7 +944,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             num_prefill_tokens=sum_query_len,
             num_decode_tokens=0,
             slot_mapping=slot_mapping,
-            attn_steps=self.attn_steps,
+            hidden_layers=self.hidden_layers,
         )
         multi_modal_kwargs = MultiModalInputs.batch(multi_modal_inputs_list)
 
@@ -1115,7 +1115,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
             num_prefill_tokens=0,
             num_decode_tokens=num_decode_tokens,
             slot_mapping=slot_mapping,
-            attn_steps=self.attn_steps,
+            hidden_layers=self.hidden_layers,
         )
         return PrepareDecodeMetadata(input_tokens=input_tokens,
                                      input_positions=input_positions,
@@ -1321,7 +1321,7 @@ class HPUModelRunnerBase(ModelRunnerBase[TModelInputForHPU]):
         attention_metadata = subtuple(metadata, 'TrimmedAttentionMetadata', [
             'attn_bias', 'seq_lens_tensor', 'block_list', 'block_mapping',
             'block_usage', 'slot_mapping', 'is_prompt', 'block_indices',
-            'block_offsets', 'block_scales', 'block_groups', 'attn_steps'
+            'block_offsets', 'block_scales', 'block_groups', 'hidden_layers'
         ])
         return attention_metadata
 
