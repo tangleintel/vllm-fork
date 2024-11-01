@@ -352,7 +352,7 @@ class LlamaModel(nn.Module):
             hidden_states, residual = layer(positions, hidden_states,
                                             kv_caches[i - self.start_layer],
                                             attn_metadata, residual)
-            if is_hpu:
+            if is_hpu and i % attn_metadata.config_hidden_layers == 0:
                 htorch.core.mark_step()
         if not get_pp_group().is_last_rank:
             return IntermediateTensors({

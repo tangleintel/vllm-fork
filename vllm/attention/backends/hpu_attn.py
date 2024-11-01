@@ -70,6 +70,7 @@ class HPUAttentionMetadata(HPUPagedAttentionMetadata, AttentionMetadata):
     attn_bias: Optional[torch.Tensor]
     seq_lens_tensor: Optional[torch.Tensor]
     context_lens_tensor: Optional[torch.Tensor]
+    config_hidden_layers: Optional[int]
 
 
 class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
@@ -100,6 +101,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
         kv_cache_dtype: str,
         blocksparse_params: Optional[Dict[str, Any]] = None,
         max_seq_len: int = 4096,
+        config_hidden_layers: Optional[int] = None,
     ) -> None:
         super(AttentionImpl, self).__init__()
         self.kv_cache_dtype = kv_cache_dtype
@@ -133,6 +135,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
             raise ValueError(
                 f"Head size {head_size} is not supported by PagedAttention. "
                 f"Supported head sizes are: {suppored_head_sizes}.")
+        self.config_hidden_layers = config_hidden_layers
 
     def forward(
         self,
@@ -215,6 +218,7 @@ class HPUAttentionImpl(AttentionImpl, torch.nn.Module):
                     matmul_qk_op=self.matmul_qk,
                     softmax_op=self.softmax,
                     matmul_av_op=self.matmul_av,
+                    valid_seq_lengths=attn_metadata.seq_lens_tensor,
                 )
             else:
                 # TODO: enable FusedSDPA
