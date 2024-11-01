@@ -245,7 +245,7 @@ class GPTBigCodeModel(nn.Module):
             hidden_states = layer(hidden_states,
                                   kv_caches[i - self.start_layer],
                                   attn_metadata)
-            if is_hpu % attn_metadata.config_hidden_layers == 0:
+            if is_hpu and i % attn_metadata.config_hidden_layers == 0:
                 htorch.core.mark_step()
         if not get_pp_group().is_last_rank:
             return IntermediateTensors({"hidden_states": hidden_states})
